@@ -4,3 +4,10 @@ node_modules/
 
 translated/
 vault/
+
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+appsettings.Development.json
