@@ -60,6 +60,10 @@ Konwencje w projektach `*_zadanie`:
 - Odpowiedź: POST `/verify`, task `findhim`, `answer` = `{name, surname, accessLevel, powerPlant}`
   (kod elektrowni, przy której osoba była najbliżej).
 - Zalecenia z lekcji: pętla agenta z limitem iteracji (10–15), model `gpt-5-mini` / `gpt-5`.
+- **Rezultat (zaliczony)**: wytypowany został **Wojciech Bielik** (ur. 1986), `accessLevel = 7`,
+  elektrownia **Chełmno `PWR2758PL`** — widziany ~980 m od niej (sighting 53.355, 18.415).
+  Pozostali podejrzani byli najbliżej: Żurek ~2,6 km (Zabrze), Nowak ~8,9 km (Zabrze),
+  Sieradzki ~9,4 km (Tczew), Jasiński ~14 km (Radom).
 
 ## Zasady pracy w tym repo
 
