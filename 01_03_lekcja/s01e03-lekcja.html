@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projektowanie API dla efektywnej pracy z modelem</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1f1d1a; --muted:#6b6559; --rule:#e2ddd2; --accent:#8a5a2b; --code-bg:#f2efe8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16150f; --fg:#ece7dc; --muted:#9c948a; --rule:#2f2c26; --accent:#d9a066; --code-bg:#211f19; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font: 400 20px/1.75 "Georgia", "Iowan Old Style", "Times New Roman", serif;
+         -webkit-font-smoothing: antialiased; }
+  main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+  .hint { max-width:46rem; margin:0 auto; padding:.85rem 1.5rem; font:500 15px/1.5 system-ui,sans-serif;
+          color:var(--muted); border-bottom:1px solid var(--rule); }
+  .hint kbd { font:600 13px/1 ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--rule);
+              border-radius:4px; padding:.15em .45em; color:var(--fg); }
+  h1 { font-size: 2.1rem; line-height:1.25; margin: 1.5rem 0 2.5rem; letter-spacing:-.01em; }
+  h2 { font-size: 1.5rem; line-height:1.3; margin: 3.5rem 0 1rem; padding-top:1.5rem; border-top:1px solid var(--rule); }
+  h3,h4 { font-size: 1.2rem; margin: 2.5rem 0 .75rem; }
+  p, li { margin: 0 0 1.15rem; }
+  ul, ol { padding-left: 1.4rem; margin: 0 0 1.5rem; }
+  li { margin-bottom: .6rem; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  strong { font-weight: 700; }
+  code { font: 500 .85em/1.5 ui-monospace, "Cascadia Mono", monospace; background: var(--code-bg);
+         padding: .12em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); border:1px solid var(--rule); border-radius: 8px; padding: 1rem 1.15rem;
+        overflow-x: auto; margin: 0 0 1.75rem; }
+  pre code { background: none; padding: 0; font-size: .8rem; line-height:1.6; }
+  blockquote { margin: 0 0 1.75rem; padding: .85rem 1.25rem; border-left: 3px solid var(--accent);
+               background: var(--code-bg); border-radius: 0 8px 8px 0; font-size:.95em; }
+  figure { margin: 2.5rem 0; }
+  figure img { width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 10px; background:#fff; }
+  figcaption { margin-top: .7rem; font: 400 15px/1.5 system-ui, sans-serif; color: var(--muted); text-align: center; }
+  figure.video iframe { width:100%; aspect-ratio: 16/9; border:0; border-radius:10px; background:#000; }
+</style>
+</head>
+<body>
+<div class="hint" aria-hidden="true">Czytaj na g&#322;os: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> &middot; g&#322;os polski wybierzesz w pasku lektora &middot; bloki kodu s&#261; pomijane przy czytaniu</div>
+<main>
+<h1>Projektowanie API dla efektywnej pracy z modelem</h1>
+<figure class="video"><iframe src="https://player.vimeo.com/video/1171080320" allow="fullscreen; picture-in-picture" allowfullscreen loading="lazy" title="Film z lekcji"></iframe><figcaption aria-hidden="true">Film — odtwórz ręcznie</figcaption></figure>
+<p>Różnica między zastosowaniem API w kodzie aplikacji a narzędziami AI dotyczy głównie właściwego zarządzania kontekstem oraz strukturą interfejsu narzędzi. Lekcja S01E02 pokazała to nam z szerokiej perspektywy, a teraz przyjrzymy się temu z bliska.</p>
+<p>Na wstępie dodam tylko, że część uwagi skupimy na Model Context Protocol (MCP). Protokół ten spotyka się z negatywnymi opiniami, co może budzić niechęć. Chciałbym jednak, abyśmy dali mu szansę. Po dotychczasowych lekcjach powinno już stawać się jasne, że większość złych doświadczeń użytkowników serwerów MCP nie wynika z samego protokołu, o czym niebawem się przekonamy. Jeśli jednak nie zmieni to Twojego zdania, większość wiedzy z tej lekcji nadal można wykorzystać przy projektowaniu narzędzi dla agentów bez uwzględniania MCP.</p>
+<h3>Cechy API wpływające na kształtowanie narzędzi dla AI</h3>
+<p>Powiedzieliśmy już wiele na temat struktury narzędzi, walidacji, obsługi błędów oraz formatów odpowiedzi. Nawet jeśli API obsługuje niektóre z nich w sposób nieprzyjazny dla modelu, możemy to skorygować na etapie projektowania narzędzi. Istnieją jednak przypadki, które trudno zaadresować bez wprowadzenia zmian w samym API.</p>
+<p>Przed rozpoczęciem prac nad narzędziem, należy zweryfikować:</p>
+<ul>
+<li>Brakujące bądź ograniczone akcje (np. brak możliwości tworzenia zasobów)</li>
+<li>Sposób odnoszenia się do zasobów, np. po identyfikatorze bądź nazwie. Model powinien mieć jasną informację o tym, że jeśli użytkownik mówi "przypisz etykietę Priorytet", to dany wpis musi uzyskać etykietę o identyfikatorze odpowiadającemu tej nazwie.</li>
+<li>Nieścisłości w strukturach zapytań i odpowiedzi (np. stosowanie <strong>content</strong> oraz <strong>body</strong>)</li>
+<li>Niekompletne bądź zbyt szczegółowe odpowiedzi (np. potwierdzanie utworzenia zasobu jedynie poprzez status <strong>201 Created</strong>)</li>
+<li>Skomplikowane relacje wymagające wielu akcji dla jednego zadania (np. dodawanie kodu rabatowego wymagające utworzenia promocji i przypisania jej do produktu)</li>
+<li>Obecności mechanizmów wymagających oczekiwania na uzyskanie rezultatu (np. polling). Ich obsługa może być domyślnie utrudniona dla agentów i warto ją zaadresować po stronie kodu.</li>
+<li>Podobnie jak akcje asynchroniczne, dla agentów problematyczny jest rate limit, który również w miarę możliwości powinniśmy adresować po stronie kodu, aby agent nie musiał uruchamiać akcji wielokrotnie.</li>
+<li>Ustawienia paginacji oraz przeszukiwania zasobów. Agenci będą szczególnie często korzystać z tych funkcjonalności, aby uniknąć pobierania zbyt dużej ilości treści z góry.</li>
+</ul>
+<p>Obecnie najlepiej jest <strong>pobrać oficjalne SDK</strong> (jeśli istnieje) i porozmawiać na jego temat z agentem do kodowania (np. Open Code). Zadając pytania, otrzymamy spersonalizowane odpowiedzi, a nawet wygenerujemy skrypty, które zweryfikują nasze założenia. Dobrze jest też zapisywać najważniejsze notatki poprzez generowanie ich treści z pomocą AI. Zasadniczo im więcej informacji zdobędziemy na temat API, tym lepiej.</p>
+<h3>Planowanie struktury narzędzi oraz schematów właściwości</h3>
+<p>Po zapoznaniu się z API, planowanie narzędzi opiera się na połączeniu wiedzy na jego temat z wiedzą o projektowaniu narzędzi i schematów dla AI o których rozmawialiśmy w lekcjach S01E01 i S01E02. Najlepiej będzie, jeśli zobaczymy to w praktyce na przykładzie narzędzi do interakcji z systemem plików ale zrealizowanych w sposób produkcyjny. Bo choć narzędzia z przykładu <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_02_tool_use" target="_blank" rel="noopener">01_02_tool_use</a> realizowały swoje zadanie, tak na potrzeby zaawansowanego agenta AI będą niewystarczające.</p>
+<p>Zanim przejdziemy dalej, wyjaśnię tylko, że Model Context Protocol (MCP) to kształtujący się standard skupiający się na możliwie łatwym połączeniu LLM z zewnętrznymi narzędziami, zasobami czy plikami oraz warstwą autoryzacji czy uprawnień. Na ten moment można wyobrazić sobie, że "MCP Server" to paczka z narzędziami, którą podłączamy do agentów. Później przejdziemy do bardziej precyzyjnej definicji.</p>
+<p>W oficjalnym serwerze <a href="https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem" target="_blank" rel="noopener">Filesystem MCP</a> widzimy dokumentację opisującą aż 13 różnych narzędzi, które muszą zostać dodane do kontekstu LLM! Są to konkretnie: <strong>read_text_file</strong>, <strong>read_media_file</strong>, <strong>read_multiple_files</strong>, <strong>write_file</strong>, <strong>edit_file</strong>, <strong>create_directory</strong>, <strong>list_directory</strong>, <strong>list_directory_with_sizes</strong>, <strong>move_file</strong>, <strong>search_files</strong>, <strong>directory_tree</strong>, <strong>get_file_info</strong>, <strong>list_allowed_directories</strong>.</p>
+<p>To całkiem sporo akcji, biorąc pod uwagę fakt, że mówimy tutaj o zaledwie jednym obszarze zadań: <strong>interakcji z systemem plików</strong>! Tymczasem agenci do kodowania (np. Cursor) pokazują nam, jak skutecznie modele LLM posługują się narzędziami takimi jak <strong>grep</strong> czy <strong>ripgrep</strong>. Sam dostęp do shella daje znacznie większe możliwości, lecz jest on zdecydowanie trudniejszy w konfiguracji i wdrożeniu na skalę produkcyjną bez sandboxów, które często przekładają się na wyższe koszty i zwiększają złożoność całego systemu.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_fs_shell-6ed06a27-0.png" alt="Porównanie MCP z narzędziami Shell / CLI" loading="lazy"><figcaption>Porównanie MCP z narzędziami Shell / CLI</figcaption></figure>
+<p>Na pierwszy rzut oka powyższy schemat jasno sugeruje, że wysiłek włożony w podłączenie sandbox'a powinien się opłacić. Natomiast nadal, nie zawsze będziemy mieć taką możliwość. W zamian, możemy skupić się na optymalizacji narzędzi z oficjalnego serwera Filesystem MCP.</p>
+<p>Bo jeśli zastanowimy się przez chwilę nad akcjami dotyczącymi plików, tak naprawdę uzyskamy cztery, główne akcje:</p>
+<ol>
+<li><strong>fs_search:</strong> Przeszukiwanie plików</li>
+<li><strong>fs_read:</strong> Odczytywanie treści</li>
+<li><strong>fs_write:</strong> Zapisywanie i edycja treści</li>
+<li><strong>fs_manage</strong>: Zarządzanie katalogami i plikami</li>
+</ol>
+<p>Zestawiając je z listą narzędzi z Filesystem MCP:</p>
+<ul>
+<li><strong>Search:</strong> może obsługiwać zarówno przeszukiwanie plików, jak i struktury katalogów, a także obejmować opcję wyświetlania szczegółów pliku oraz listę dostępnych katalogów.</li>
+<li><strong>Read:</strong> może obsługiwać pliki tekstowe, binarne oraz wczytywanie wielu plików na raz.</li>
+<li><strong>Write</strong>: może zastąpić <strong>write_file</strong> oraz <strong>edit_file</strong>.</li>
+<li><strong>Manage</strong>: może zastąpić wszystkie akcje związane z tworzeniem i modyfikacją katalogów oraz plików, wliczając w to ich przenoszenie.</li>
+</ul>
+<figure><img src="https://cloud.overment.com/2026-01-27/aidevs_4_mcp_optimization-090c65f0-6.png" alt="Optymalizacja rodzajów narzędzi i ich odpowiedzialności" loading="lazy"><figcaption>Optymalizacja rodzajów narzędzi i ich odpowiedzialności</figcaption></figure>
+<p>Przy takiej "optymalizacji" narzędzi zawsze należy pamiętać o ich przejrzystości. Celem nie jest wyłącznie zmniejszenie liczby schematów, lecz odnalezienie właściwego balansu między dostępnymi akcjami a skutecznością ich obsługi przez model.</p>
+<p>Dokładnie na tej samej zasadzie można planować narzędzia dla AI, analizując dostępne akcje API. Proces ten najlepiej zrealizować wspólnie z LLM. Musimy tylko wgrać do kontekstu plik z zestawieniem dostępnych endpointów, właściwości i obiektów odpowiedzi.</p>
+<h3>Optymalizacja interfejsu na potrzeby modeli językowych</h3>
+<p>Mając założenia dotyczące listy narzędzi, możemy przejść do kształtowania ich interfejsu. Na uwadze musimy mieć <strong>strukturę API</strong> (w naszym przypadku są to akcje dotyczące systemu plików), <strong>perspektywę i możliwości LLM</strong> oraz <strong>przypadki użycia</strong>. Zatem:</p>
+<ul>
+<li>API definiuje fundamentalne możliwości i ograniczenia dostępnych akcji</li>
+<li>Perspektywa LLM wymaga zachowania przejrzystości narzędzi</li>
+<li>Możliwości LLM mówią o poziomie złożoności akcji oraz wyników ich działania</li>
+<li>Ograniczenia LLM mówią o potencjalnych problemach, np. halucynacji</li>
+<li>Przypadki użycia adresują potrzeby użytkownika oraz cel budowanych narzędzi</li>
+</ul>
+<p>To wszystko pozwoli nam na ukształtowanie schematów, więc przejdźmy teraz przez poszczególne narzędzi, począwszy od <strong>fs_read</strong>.</p>
+<p>Odczytywanie plików i katalogów działa w dwóch trybach, ale współdzieli strukturę parametrów. Po prostu niektóre z nich są ignorowane w zależności od trybu. Podobnie zachowuje się struktura odpowiedzi, ale tutaj pojawiają się już istotne różnice. Patrząc na te schematy, warto zwrócić uwagę na <strong>proste nazwy</strong> oraz <strong>minimalną ilość danych</strong> z opcją określania <strong>trybu</strong> oraz <strong>detali</strong>.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_fsread-dacb713a-7.png" alt="Szczegóły narzędzia FS Read" loading="lazy"><figcaption>Szczegóły narzędzia FS Read</figcaption></figure>
+<p>Po stronie implementacji dzieje się dość dużo, ponieważ uwzględniamy różnego rodzaju sytuacje brzegowe oraz pomyłki modelu. W obu przypadkach zwracane są niezbędne informacje wraz z dynamicznie generowaną wskazówką, dzięki której agent potencjalnie wie, co należy zrobić dalej.</p>
+<p>Odpowiednio reagujemy na sytuacje w których dokumenty bądź katalogi zawierają zbyt dużo informacji albo gdy agent próbuje przekroczyć narzucone uprawnienia. Podobnie też stosujemy mechaniki wspierające eksplorowanie plików, np. rozwiązując ścieżkę do dokumentu w sytuacji gdy model poda jedynie jego nazwę.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_fs_read_cases-7dfea0be-1.png" alt="Przykłady zachowań narzędzia fs_read, obsługi błędów i sytuacji brzegowych" loading="lazy"><figcaption>Przykłady zachowań narzędzia fs_read, obsługi błędów i sytuacji brzegowych</figcaption></figure>
+<p>Oczywiście można dyskutować, czy warto było wyodrębnić narzędzia <strong>fs_read_file</strong> oraz <strong>fs_read_directory</strong> zamiast jednego <strong>fs_read</strong>. Decyzję o tym można jednak podjąć indywidualnie, rozważając kontekst konkretnego projektu. W tym przypadku, pracując w ten sposób przez ostatnie miesiące (w nieco zmienionej formie), nie zauważyłem, aby LLM miał problem z ich obsługą.</p>
+<p>Bardziej istotny jest tutaj sposób myślenia o implementacji, który wyraźnie wykracza poza standardowe działania stosowane przy projektowaniu API dla narzędzi i usług. Tam znacznie rzadziej dba się o kwestie takie jak automatyczne rozwiązywanie ścieżek czy tak szczegółowe wskazówki. Poza tym widoczne jest tutaj także projektowanie z myślą o <strong>przypadkach użycia</strong>, dzięki którym adresujemy sytuacje nieprzyjazne dla modelu (np. związane z przekroczeniem kontekstu).</p>
+<p>W oparciu o to samo podejście powstało narzędzie <strong>fs_write</strong>, jednak w tym przypadku pojawia się kilka dodatkowych mechanik wynikających z jego specyfiki. Przeszukiwanie i odczytywanie plików zazwyczaj nie wiąże się ze zbyt dużym ryzykiem, natomiast ich modyfikowanie stwarza znaczną przestrzeń do popełnienia błędów.</p>
+<p>Wiemy już, że <strong>nie mamy możliwości zabezpieczenia się przed wszelkimi pomyłkami</strong>, ale mamy możliwość minimalizowania ryzyka ich wystąpienia. Dlatego zastosowałem weryfikację <strong>checksum</strong> oraz opcję <strong>dryRun</strong>. Dzięki nim agent nie może nadpisać pliku, który został w międzyczasie zmieniony oraz może sprawdzić jak będzie wyglądał dokument po wprowadzaniu zmian.</p>
+<figure><img src="https://cloud.overment.com/2026-03-09/ai_devs_4_fs_write-4163dd85-b.png" alt="Schemat narzędzia fs_write" loading="lazy"><figcaption>Schemat narzędzia fs_write</figcaption></figure>
+<p>Poniższe przykłady użycia pokazują również odpowiednie podejście do informowania modelu o wynikach. Mogłoby się wydawać, że przy tworzeniu lub aktualizacji pliku zwracanie jego ścieżki nie jest konieczne. W praktyce jest to jednak istotne, aby <strong>wzmocnić</strong> zachowanie modelu, dzięki czemu będzie on w stanie wykorzystać zmodyfikowany plik w dalszych akcjach.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_rswrite_cases-aee30a3e-9.png" alt="Przykłady użycia fs_write" loading="lazy"><figcaption>Przykłady użycia fs_write</figcaption></figure>
+<p>W przypadku akcji „stratnych”, takich jak <strong>zapisywanie</strong> czy <strong>edycja</strong>, warto zadbać o możliwość przywrócenia błędnych modyfikacji. Powinno się to odbywać bez angażowania modelu, na przykład poprzez przechowywanie historii wprowadzanych zmian.</p>
+<p>Narzędzia <strong>fs_search</strong> i <strong>fs_manage</strong> budowane są według tych samych zasad. Dołączam jednak ich schematy do wglądu na poniższych grafikach, bo warto zwrócić uwagę szczególnie na nazwy właściwości, ich domyślne ustawienia oraz opcje konfiguracji. W przypadku <strong>fs_search</strong> mówimy także o możliwości dopasowania zarówno nazw plików, jak i fragmentów treści, co zwiększa elastyczność i potencjalnie skuteczność wyszukiwania.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_fs_search-f5ebca01-4.png" alt="Schemat narzędzia fs_search" loading="lazy"><figcaption>Schemat narzędzia fs_search</figcaption></figure>
+<p>Na koniec mamy jeszcze <strong>fs_manage</strong>, w którego przypadku możemy nawet <strong>usuwać pliki</strong>. Warto się zastanowić czy w ogóle chcemy dawać agentowi taką możliwość, ale w tym przypadku i tak została ona ograniczona do pojedynczego pliku oraz wyłącznie <strong>pustych</strong> katalogów. W niektórych aplikacjach możemy tu jeszcze rozważyć koncepcję "kosza" bądź rodzaju archiwum, co pozwoli na łatwe przywrócenie usuniętych treści.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_fs_manage-5a927df9-b.png" alt="Schemat narzędzia fs_manage" loading="lazy"><figcaption>Schemat narzędzia fs_manage</figcaption></figure>
+<p>Powyższe przykłady oddają zasady, którymi możemy kierować się przy projektowaniu narzędzi dla dowolnych integracji. Z powodzeniem można je także wykorzystać przy projektowaniu API, aby ułatwić późniejszą integrację z modelami językowymi.</p>
+<h3>Projektowanie dynamicznych odpowiedzi sukcesu oraz błędów</h3>
+<p>Niemal w każdej akcji dodaję pole <strong>hints</strong> bądź <strong>recoveryHints</strong>, których treść jest zaprojektowana dla modelu w celu ułatwienia kolejnych działań. Choć dobre praktyki projektowania API mówią o tym, abyśmy informowali użytkownika o błędach, tak tutaj warto wspierać model również wtedy, gdy wszystko idzie zgodnie z planem.</p>
+<p>Można pomyśleć, że przy obecnym rozwoju modeli, taka praktyka przestanie mieć sens i do pewnego stopnia jest to prawda. Jednak nawet wtedy część z tych wiadomości będzie użyteczna ze względu na kontekst, który nie zależy bezpośrednio od poziomu inteligencji modelu, lecz informacji z otoczenia. Mowa na przykład o wiedzy na temat ograniczeń uprawnień, które ujawniają się dopiero w wyniku podjęcia działań, jak chociażby duża liczba plików w przeszukiwanym katalogu.</p>
+<p>Całość układa nam się w następujące zasady:</p>
+<ul>
+<li>Błąd operacji powinien mówić nie tylko o tym, co się stało, ale też o tym, co można z tym zrobić. Na przykład "Treść pliku została zaktualizowana. Przeczytaj go ponownie."</li>
+<li>Status zasobu wymagający szczególnych ustawień, powinien zostać zakomunikowany. Np. wyszukanie dokumentu może zawierać informację: "Dokument istnieje, ale jest chroniony przed zapisem przez ustawienia użytkownika."</li>
+<li>Sugestie dalszych kroków po poprawnej akcji, mogą pomóc uniknąć agentowi niepotrzebnych kroków. Np. "Znaleziono 3 dokumenty. Przed ich edycją wczytaj wcześniej ich treść."</li>
+<li>Błędnie ustalone wartości powinny sugerować dostępne opcje, np. "Błędny rodzaj etykiety. Dostępne etykiety to: 'X, Y, Z'".</li>
+<li>Informacje o korektach wprowadzonych przez narzędzia, np. "Żądano wczytania zakresu linii 48–70, ale dokument ma tylko 59 linii. Wczytano dostępny zakres 48–59."</li>
+</ul>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_hints_llm-16782f1c-6.png" alt="Wskazówki dla LLM w odpowiedziach narzędzi" loading="lazy"><figcaption>Wskazówki dla LLM w odpowiedziach narzędzi</figcaption></figure>
+<p>Powyższe dynamiczne komunikaty generowane z pomocą kodu zawsze będą oznaczały jego znacznie większą złożoność. W końcu generyczne komunikaty błędów API nie wynikają z intencji programistów, lecz tego, że wymagają napisania wysokiej jakości kodu, co zwykle zajmowało mnóstwo czasu.</p>
+<p>Chociażby rozszerzenie logiki skanowania katalogów o pełne raportowanie nie tylko rezultatów ale też statusów dla poszczególnych rezultatów, zwiększa złożoność aplikacji oraz wymagane zaangażowanie na etapie jej planowania.</p>
+<figure><img src="https://cloud.overment.com/2026-01-27/ai_devs_4_hint_complexity-4767c8b8-b.png" alt="" loading="lazy"></figure>
+<p>Obecnie jednak <strong>nie należy z tego rezygnować</strong> bo zarówno etap planowania jak i implementacji może być znacznie ułatwiony przez współpracę z AI. Generowanie przypadków użycia, testów oraz samego kodu, w tym także wielokrotne iterowanie leży w zasięgu nawet pojedynczych developerów i małych zespołów.</p>
+<p>Tymczasem kod źródłowy narzędzi do zarządzania systemem plików, które omówiliśmy do tej pory można znaleźć na moim GitHubie w repozytorium <strong><a href="https://github.com/iceener/files-stdio-mcp-server" target="_blank" rel="noopener">files-stdio-mcp-server</a></strong>. Na tym etapie można się zapoznać przede wszystkim z katalogiem <strong><a href="https://github.com/iceener/files-stdio-mcp-server/tree/main/src/tools" target="_blank" rel="noopener">src/tools</a></strong> ponieważ reszta dotyczy Model Context Protocol o którym powiemy sobie za chwilę.</p>
+<h3>Model Context Protocol vs własna implementacja</h3>
+<p>Model Context Protocol <a href="https://www.anthropic.com/news/model-context-protocol" target="_blank" rel="noopener">został zaproponowany przez Anthropic</a> w listopadzie 2024, jako odpowiedź na problem łączenia LLM i agentów AI z otoczeniem. Problem ten polega na konieczności tworzenia od podstaw integracji i narzędzi Function Calling / Tool Use, czyli dokładnie tego o czym do tej pory rozmawialiśmy w lekcjach.</p>
+<p>Choć Function Calling jest dostępny u każdego providera, tak formaty API różnią się od siebie. Podobnie też obsługa narzędzi jest inaczej implementowana w Claude Code, Claude, ChatGPT czy Cursor. Zatem jeśli chcemy sprawić by agenci AI mieli dostęp do naszego serwisu, musielibyśmy tworzyć dedykowane rozwiązania dla każdego z klientów. Natomiast dzięki MCP sprawiamy, że raz stworzoną integrację można łatwo podłączyć niemal wszędzie.</p>
+<p>Model Context Protocol wymaga, aby nasza aplikacja stała się <strong>hostem</strong> umożliwiającym tworzenie połączeń (tzw. <strong>client</strong>) z zewnętrznym procesem lub aplikacją określaną jako <strong>server</strong>. Wszystkie trzy koncepcje (host/client/server) stanowią fundament protokołu.</p>
+<figure><img src="https://cloud.overment.com/2026-01-28/ai_devs_4_mcp_concepts-2bc4062d-d.png" alt="" loading="lazy"></figure>
+<p>Aby to lepiej zrozumieć, spójrzmy na przykład <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_mcp_native" target="_blank" rel="noopener">01_03_mcp_native</a>. Jest to prosta aplikacja spełniająca definicję <strong>hosta</strong>, ponieważ pozwala na tworzenie połączeń za które odpowiada <strong>client</strong>. Jedynie fizycznie <strong>server</strong> znajduje się w tym samym katalogu, natomiast równie dobrze może być przeniesiony w inne miejsce.</p>
+<p>Tymczasem nasz <strong>host</strong> składa się z następujących elementów:</p>
+<ul>
+<li><strong>Natywne narzędzia:</strong> czyli schematy i definicje dla Function Calling. Nie mają one nic wspólnego z MCP, ale celowo umieszczam je w przykładzie, aby pokazać, że <strong>korzystanie z MCP nie jest konieczne</strong>, a protokół nie musi stanowić <strong>alternatywy</strong>, lecz funkcjonować <strong>wspólnie</strong> z wbudowanymi narzędziami.</li>
+<li><strong>Narzędzia MCP:</strong> z technicznego punktu widzenia są one takie same, jak natywne narzędzia. Po prostu w tym przypadku nie są one częścią kodu źródłowego aplikacji (Hosta), lecz są dostarczone przez połączenie (Client) bezpośrednio z Serwera MCP.</li>
+<li><strong>Połączenie schematów z obu źródeł:</strong> skoro zarówno natywne narzędzia, jak i narzędzia udostępnione przez MCP są tym samym, to możemy połączyć je w jedną listę.</li>
+<li><strong>Połączenie handler'ów z obu źródeł:</strong> podobnie jak ze schematami, handler'y również mogą trafić na tę samą listę.</li>
+<li><strong>Dostarczenie schematów Function Calling:</strong> dzięki połączeniu schematów narzędzi, do modelu trafiają one dokładnie w tej samej formie.</li>
+<li><strong>Wywołanie handler'ów:</strong> gdy agent zdecyduje o uruchomieniu danego narzędzia, to łatwo możemy je odnaleźć.</li>
+</ul>
+<p>Całość prezentuje się następująco:</p>
+<figure><img src="https://cloud.overment.com/2026-01-28/ai_devs_4_mcp_tools-890847b5-8.png" alt="Połączenie natywnych narzędzi z narzędziami MCP" loading="lazy"><figcaption>Połączenie natywnych narzędzi z narzędziami MCP</figcaption></figure>
+<p>Przekładając to na interakcję widzimy, że z perspektywy agenta <strong>źródło pochodzenia narzędzi nie ma znaczenia</strong>. Czyli z tej perspektywy Model Context Protocol dotyczy **sposobu przechowywania i dostarczania narzędzi<em> w spójnej formie</em>*, dzięki czemu możemy łatwo podłączać serwery MCP do różnych Hostów, np. Claude Code, Cursor czy ChatGPT.</p>
+<figure><img src="https://cloud.overment.com/2026-01-28/ai_devs_4_mcp_interaction-7f4d92bc-0.png" alt="Przykład interakcji z agentem wyposażonym w narzędzia natywne oraz MCP" loading="lazy"><figcaption>Przykład interakcji z agentem wyposażonym w narzędzia natywne oraz MCP</figcaption></figure>
+<p>Nim przejdziemy dalej, dodam tylko, że <strong>narzędzia nie są jedynym elementem serwerów MCP</strong>. Resztą zajmiemy się niebawem.</p>
+<h3>Główne komponenty MCP dla STDIO i Streamable HTTP</h3>
+<p>Model Context Protocol to nie tylko narzędzia dla agentów, ale także:</p>
+<ol>
+<li><strong>Apps:</strong> czyli interaktywne interfejsy zwracane w odpowiedzi agenta, obejmujące nie tylko wyświetlanie danych, ale także możliwość wykonywania akcji bez opuszczania aplikacji klienta.</li>
+</ol>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_mcp_apps-fb210306-c.png" alt="MCP Apps" loading="lazy"><figcaption>MCP Apps</figcaption></figure>
+<ol>
+<li><strong>Resources:</strong> Statyczne bądź dynamiczne dane do odczytu, np. pliki tekstowe, obrazy czy listy zasobów (np. /users). Ich sposób aktywacji podczas interakcji nie jest zdefiniowany i może być uzależniony zarówno od interfejsu użytkownika, jak i od decyzji agenta.</li>
+</ol>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_mcp_resources-e3c48eb8-a.png" alt="MCP Resources" loading="lazy"><figcaption>MCP Resources</figcaption></figure>
+<ol>
+<li><strong>Prompts:</strong> to predefiniowane instrukcje, mogące zawierać dynamiczne elementy. Ich aktywacja jest uzależniona od użytkownika, który może wybrać je np. z listy dostępnych komend.</li>
+</ol>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_mcp_prompts-dd7e84ce-0.png" alt="MCP Prompts" loading="lazy"><figcaption>MCP Prompts</figcaption></figure>
+<ol>
+<li><strong>Sampling:</strong> to możliwość odwróconej interakcji w której to Serwer MCP przesyła żądanie, które ma zostać przesłane do modelu. Interakcja ta wymaga bezwzględnej akceptacji ze strony użytkownika.</li>
+</ol>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_mcp_sampling-cb5c8953-8.png" alt="" loading="lazy"></figure>
+<ol>
+<li><strong>Elicitation:</strong> podobnie jak sampling, to możliwość odwróconej komunikacji, ale w tym przypadku kierowanej do użytkownika, np. uzupełnienie formularza bądź wykonania zewnętrznej akcji w przeglądarce.</li>
+</ol>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_elicitation-305381f2-4.png" alt="" loading="lazy"></figure>
+<p>Obecnie większość serwerów MCP w ogóle nie wykorzystuje powyższych możliwości. Wsparcie po stronie klientów również bywa zazwyczaj ograniczone, lecz ostatnio pojawia się coraz więcej aplikacji oferujących pełną obsługę całego protokołu. Zauważalne są także przykłady serwerów MCP, które wykraczają poza udostępnianie wyłącznie narzędzi.</p>
+<p>W przykładzie <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_mcp_core" target="_blank" rel="noopener">S01E03_mcp_core</a> znajduje się serwer MCP, który można podłączyć pod <a href="https://modelcontextprotocol.io/docs/tools/inspector" target="_blank" rel="noopener">MCP Inspector</a>, czyli narzędzie do testowania serwerów MCP. Wystarczy w ustawieniach połączenia wskazać <strong>Transport Type</strong> na <strong>STDIO</strong>, <strong>Command</strong> na <strong>node</strong> oraz <strong>Arguments</strong> na ścieżkę do pliku <strong>/01_03_mcp_core/src/mcp/server.js</strong>. Alternatywnie przykład można uruchomić także poleceniem <strong>npm start</strong>.</p>
+<p>Poza głównymi komponentami protokołu MCP ważne są także <a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/transports" target="_blank" rel="noopener">sposoby komunikacji</a> client - server. Jest to albo <strong>STDIO</strong> dla procesów lokalnych albo <strong>Streamable HTTP</strong> dla serwerów zdalnych. Różnica pomiędzy nimi jest taka, że:</p>
+<ul>
+<li><strong>STDIO:</strong> wykorzystamy tam, gdzie zależy nam na interakcji z lokalnym systemem plików bądź narzędziami dostępnymi na maszynie, na której uruchomiony jest dany serwer MCP, np. <strong>ffmpeg</strong>. STDIO sprawdza się zatem najlepiej w aplikacjach desktopowych, w których serwer obsługuje tylko jednego użytkownika (ponieważ każde połączenie oznacza, konieczność utworzenia nowego procesu).</li>
+<li><strong>Streamable HTTP:</strong> powinien być wybierany domyślnie przy budowie serwerów MCP. Dzięki temu możemy uruchomić je na VPS czy Cloudflare Workers oraz obsługiwać sesje użytkowników, wliczając w to także OAuth 2.1.</li>
+</ul>
+<h3>Projekt klienta oraz serwera MCP na back-endzie</h3>
+<p>Host MCP utożsamiany jest z aplikacją webową bądź desktopową, np. Claude. Natomiast Model Context Protocol może być zintegrowany na back-endzie, bez jakiegokolwiek graficznego interfejsu. Już nawet przykład <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_mcp_core" target="_blank" rel="noopener">01_03_mcp_core</a> pokazuje nam, że jest to możliwe, ale teraz przejdziemy przez nieco bardziej rozbudowaną aplikację wykorzystującą <a href="https://github.com/iceener/files-stdio-mcp-server" target="_blank" rel="noopener">Files MCP</a> o którym rozmawialiśmy wcześniej.</p>
+<p>Naszym celem będzie stworzenie <strong>agenta tłumaczącego dokumenty tekstowe</strong> z pomocą narzędzi umożliwiających mu interakcję z systemem plików. Taki tłumacz teoretycznie mógłby mieć formę zwykłego <strong>workflow</strong> w którym:</p>
+<ol>
+<li>Dokument byłby podzielony na mniejsze fragmenty.</li>
+<li>Każdy fragment zostałby tłumaczony przez LLM</li>
+<li>Przetłumaczone fragmenty byłyby połączone w dokument końcowy</li>
+</ol>
+<p>Takie podejście <strong>może</strong> się sprawdzić, ale jego ograniczeniem jest brak możliwości zareagowania na np. błąd tłumaczenia bądź formatowania fragmentu, który został już zapisany. W przypadku agenta AI, ma on możliwość skanowania dokumentu w dowolny sposób, a także weryfikowania wyników czy wprowadzania poprawek. Struktura agenta wygląda zatem następująco:</p>
+<ol>
+<li>Podłączenie narzędzi z Files MCP do interakcji z systemem plików</li>
+<li>Otrzymanie informacji o nowym pliku do przetłumaczenia</li>
+<li>Zapoznanie się z dokumentem, rozpoczęcie tłumaczenia, weryfikacja, poprawki i potwierdzenie wykonania zadania. Tutaj jednak część akcji jest opcjonalna i może być uruchomiona w dowolnej kolejności.</li>
+</ol>
+<p>Poniższa wizualizacja przedstawia różnicę między dwoma podejściami, która jasno sugeruje, że w pierwszym przypadku <strong>mamy dużą kontrolę, ale niską elastyczność</strong>, a w drugim sytuacja jest odwrotna: zyskujemy wysoką dynamikę, lecz pojawia się zarówno ryzyko błędu, jak i szansa na znacznie lepsze rezultaty.</p>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_workflow_vs_agent-de39b393-d.png" alt="Porównanie workflow z agentem w kontekście tłumaczeń" loading="lazy"><figcaption>Porównanie workflow z agentem w kontekście tłumaczeń</figcaption></figure>
+<p>Nasz agent będzie składał się z trzech głównych elementów:</p>
+<ol>
+<li>Pętli obserwującej zawartość katalogów <strong>translate / translated</strong>, która powiadomi agenta o nowych plikach do tłumaczenia.</li>
+<li>Klienta MCP, dzięki któremu nawiążemy połączenie z <a href="https://github.com/iceener/files-stdio-mcp-server" target="_blank" rel="noopener">serwerem Files MCP</a> i tym samym uzyskamy dostęp do narzędzi do interakcji z systemem plików ograniczonej do katalogu <strong>workspace</strong>.</li>
+<li>Pętli agenta, którego zadaniem będzie wykorzystanie dostępnych narzędzi do przeprowadzenia tłumaczenia otrzymanego dokumentu. W instrukcji systemowej agenta pojawią się więc <strong>ogólne zasady oraz schematy</strong>, które chcemy uwzględnić w działaniu agenta, ale sposób wykonania zadania będzie uzależniony od modelu. To bardzo istotna różnica, ponieważ jeśli chcemy aby agent <strong>zawsze</strong> zrealizował zadanie według ustalonych kroków, to wówczas powinniśmy zastanowić się czy nie lepiej jest zbudować AI workflow.</li>
+</ol>
+<p>Także system plików oraz proces serwera MCP udostępniającego narzędzia technicznie znajdują się "poza aplikacją", ale są z nią połączone. Widzimy także, że <strong>MCP Client</strong> stanowi część naszej aplikacji, a to oznacza, że spełnia ona definicję <strong>MCP Host</strong>, pomimo tego, że nie posiada graficznego interfejsu.</p>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_translation_agent-301a7de1-2.png" alt="Architektura agenta do tłumaczeń" loading="lazy"><figcaption>Architektura agenta do tłumaczeń</figcaption></figure>
+<p>Połączenie MCP <strong>Client - Server</strong> jest dla nas nowym elementem, więc przyjrzyjmy się mu bliżej. Mowa konkretnie o pliku <a href="https://github.com/i-am-alice/4th-devs/blob/main/01_03_mcp_translator/src/mcp/client.js" target="_blank" rel="noopener">client.js</a> w którym:</p>
+<ul>
+<li><strong>Konfiguracja:</strong> wczytujemy plik <strong>mcp.json</strong> z obiektem konfiguracyjnym serwerów MCP z którymi chcemy się połączyć. W tym przypadku jest to serwer STDIO.</li>
+<li><strong>Połączenie:</strong> tworzymy połączenie, którym zarządza klient. Przekazujemy tu argumenty, zmienne środowiskowe, a w zamian otrzymujemy połączenie z serwerem MCP.</li>
+<li><strong>Komunikacja:</strong> klient w każdej chwili może poprosić serwer o zwrócenie listy dostępnych narzędzi, być poinformowany o zmianach oraz wykonywać wskazane przez agenta funkcje.</li>
+</ul>
+<figure><img src="https://cloud.overment.com/2026-01-29/ai_devs_4_mcp_connection-7a4e6f4d-0.png" alt="Połączenie MCP" loading="lazy"><figcaption>Połączenie MCP</figcaption></figure>
+<p>Całość znajduje się w przykładzie <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_mcp_translator" target="_blank" rel="noopener">01_03_mcp_translator</a>, który po uruchomieniu <strong>przetłumaczy</strong> przykładowy dokument, który zostanie zapisany w katalogu <strong>workspace/translated</strong>. Podobnie też jeśli dodamy nowy plik tekstowy do katalogu <strong>workspace/translate</strong>, agent na niego zareaguje i rozpocznie przetwarzanie.</p>
+<h3>Budowanie serwerów MCP ze schematami „spec-driven”</h3>
+<p>Tworzenie serwerów MCP na tym etapie może wydawać się bardzo proste i takie jest, jeśli mówimy o prostych interakcjach. Jeśli jednak podejdziemy do tego na poważnie, sytuacje się komplikuje. Z tego powodu przygotowałem na swoje potrzeby szablon serwera MCP dla transportu <strong>Streamable HTTP</strong>. Szablon ten wykorzystuję do budowania integracji na swoje potrzeby, ale publicznie udostępniam go na swoim Githubie. Naturalnie nie ma konieczności, aby z niego korzystać, ale może stanowić pewien punkt odniesienia. Sam szablon jest napisany w języku <strong>TypeScript</strong>, ale ogólne zasady pozostaną takie same dla pozostałych języków.</p>
+<p>Serwery MCP są zwykle bardzo powtarzalne pod kątem ogólnej architektury, więc zastosowanie szablonu ma tutaj duży sens. Co więcej, do tworzenia nowych serwerów na jego podstawie niemal w 100% powinniśmy wykorzystać model językowy. Problem w tym, że ich wiedza na temat wciąż kształtującego się protokołu może być nieaktualna, więc oprzemy się o dokument README.md oraz manual.md, które powinny być nie tylko wczytane do kontekstu konwersacji z agentem AI (np. Cursor) ale też przypominane możliwie często.</p>
+<p>Przejdziemy teraz przez proces tworzenia serwera MCP na podstawie szablonu. Naszym celem będzie zintegrowanie się z narzędziem <strong><a href="https://uploadthing.com/" target="_blank" rel="noopener">uploadthing.com</a></strong> dzięki czemu nasz agent zyska możliwość udostępniania plików w formie linków. Serwis ten posiada bezpłatny plan, więc wystarczy jedynie rejestracja konta.</p>
+<p>W związku z tym, że obecnie mamy do dyspozycji agentów zdolnych do wykonania nawet złożonych zadań za jednym razem, bądź kilku iteracjach, proces <strong>generowania serwerów MCP</strong> wygląda następująco:</p>
+<ol>
+<li>Pobierz szablon z repozytorium <strong><a href="https://github.com/iceener/streamable-mcp-server-template" target="_blank" rel="noopener">Streamable MCP Template</a></strong></li>
+<li>Utwórz dokument API.md z treścią wklejonej dokumentacji narzędzia uploadthing.com</li>
+<li>Zapytaj agenta AI o przeczytanie plików README.md oraz manual.md</li>
+<li>Zapytaj agenta AI o zasugerowanie listy narzędzi MCP, które można utworzyć na podstawie dostępnego API</li>
+<li>Zapoznaj się z listą i zastosuj wskazówki z naszych lekcji, takie jak ograniczenie liczby narzędzi poprzez ich grupowanie bądź odrzucenie niepotrzebnych.</li>
+<li>Zapytaj o strukturę input / output narzędzi, uwzględniając wskazówki z naszych dotychczasowych lekcji</li>
+<li>Poproś o zaimplementowanie</li>
+<li>Zweryfikuj kod i zasugeruj poprawki.</li>
+<li>Poproś o usunięcie niewykorzystywanych elementów szablonu.</li>
+</ol>
+<p>W ten sposób możemy zbudować większość spersonalizowanych serwerów MCP. Oczywiście musimy zapoznać się z kodem i wspólne z agentem zastanowić się nad tym, czy implementacja jest poprawna, szczególnie biorąc pod uwagę detale struktur narzędzi. Jednak nawet jeśli będzie wiązało się to z kilkunastoma iteracjami, proces pozostaje taki sam.</p>
+<p>Prosty agent korzystający z serwera MCP dla <strong>uploadthing</strong> dostępny jest w przykładzie <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_upload_mcp" target="_blank" rel="noopener">01_03_upload_mcp</a>, po którego uruchomieniu dojdzie do wgrania do chmury plików z katalogu <strong>workspace</strong> oraz zapisania rezultatu w pliku <strong>uploaded.md</strong>. Sam serwer będzie przydatny w osobistych automatyzacjach, gdzie często pojawia się konieczność udostępniania plików.</p>
+<blockquote>UWAGA: Dla ułatwienia uruchomienia upload_mcp w katalogu <a href="https://github.com/i-am-alice/4th-devs/tree/main/mcp/uploadthing-mcp" target="_blank" rel="noopener">mcp/uploadthing-mcp</a> umieściłem przykładową implementację serwera dla uploadthing.com. Należy wspólnie z agentem AI przejść przez jego konfigurację, albo lokalnie, albo przez Cloudflare Workers i następnie w pliku <a href="https://github.com/i-am-alice/4th-devs/blob/main/01_03_upload_mcp/mcp.json" target="_blank" rel="noopener">mcp.json</a> uzupełnić adres tego serwera.</blockquote>
+<h3>Problemy dotyczące bezpieczeństwa oraz prywatności</h3>
+<p>Generowanie serwerów MCP czy narzędzi dla LLM nie rozwiązuje samoistnie problemów bezpieczeństwa oraz prywatności użytkowników. Co więcej, część z związanych z tym problemów pozostaje otwarta (np. prompt injection) i obecnie nie ma na nie uniwersalnego rozwiązania poza ewentualnym fizycznym ograniczeniem, które jednocześnie zmniejsza możliwości agentów.</p>
+<p>Gdy tworzymy narzędzia, czy nawet serwery MCP na potrzeby wewnętrznych systemów, nasz poziom kontroli jest znacznie wyższy, bo:</p>
+<ul>
+<li>Posiadamy kontrolę nad zasobami oraz akcjami dostępnymi w ramach narzędzi</li>
+<li>Znamy listę narzędzi i ich możliwych konfiguracji (np. pobierz dane → wyślij raport)</li>
+<li>Posiadamy wiedzę o procesach realizowanych przez agentów AI oraz roli człowieka</li>
+<li>Możemy nauczyć użytkowników pracy z agentami i wyjaśnić ewentualne problemy</li>
+<li>Przepływ informacji może być ograniczony jedynie do struktur firmowych</li>
+</ul>
+<p>Niemal wszystkie te punkty tracą jednak znaczenie, gdy udostępniamy serwer MCP użytkownikom końcowym. Wówczas nie dysponujemy informacjami o hoście, pozostałych narzędziach, realizowanych procesach czy zakresie danych. Nasza wiedza o użytkowniku jest bardzo ograniczona, zatem możemy spodziewać się wszystkiego, włączając w to działania wynikające z negatywnych intencji samej osoby lub płynące z jej otoczenia (np. z otrzymywanych wiadomości e-mail).</p>
+<p>Dlatego wszędzie tam, gdzie to możliwe, powinniśmy stosować <strong>programistyczne</strong> ograniczenia - blokady dostępu, ograniczenie akcji, limity zapytań, dodatkowe weryfikacje, anonimizowanie danych i porządne walidacje to absolutne podstawy. Jednocześnie możemy też dojść do wniosku, że wybrane zasoby i akcje zwyczajnie <strong>nie mogą</strong> zostać udostępnione agentom AI. Przynajmniej nie na obecnym etapie rozwoju modeli.</p>
+<p>Problemy o których tu mówimy co prawda nie wynikają bezpośrednio z Model Context Protocol, bo istnieją już na poziomie Function Calling. Jednocześnie MCP robi stosunkowo niewiele, aby je zaadresować. W dodatku obietnica "podłączenia narzędzi jak przez USB" buduje wysokie oczekiwania biznesu oraz końcowych użytkowników. Musimy więc być świadomi zagrożeń i komunikować je do biznesu posługując się konkretnymi przykładami, a niekiedy także prezentacjami. Jednocześnie warto pozostawać na bieżąco z rozwojem modeli oraz ekosystemu narzędzi, bo część wymienionych problemów za jakiś czas może stracić na znaczeniu.</p>
+<h3>Autoryzacja serwerów MCP i kontrola uprawnień użytkowników</h3>
+<p>Autoryzacja serwerów MCP to proces obejmujący zarówno MCP Client jak i MCP Server. Choć może się wydawać, że budowanie aplikacji typu MCP Host (np. Claude) nie będzie nas dotyczyć, tak nawet przykład zastosowania MCP na back-endzie sugeruje coś innego.</p>
+<p>Interakcja z serwerem MCP zwykle będzie wymagać podania klucza (lub kluczy) API w celu uzyskania dostępu do samego serwera, bądź powiązanych z nim usług. Nierzadko też serwer MCP będzie wymagał autoryzacji OAuth. W tym pierwszym przypadku za przechowanie kluczy API odpowiada MCP Host i serwer MCP wykorzystuje go jedynie do podjęcia akcji w ramach bieżącego zadania. Oczywiście musimy zadbać o to, aby klucze nie trafiły w niepożądane miejsca, ale sama praca z nimi jest dość prosta.</p>
+<p>Sytuacja komplikuje się, gdy do gry wchodzi OAuth, ponieważ znacznie zwiększa on złożoność zarówno klienta, jak i serwera. Proces autoryzacji obejmuje wówczas etapy takie jak:</p>
+<ul>
+<li>odkrywanie serwera autoryzującego poprzez metadane</li>
+<li>walidację klienta przez sprawdzenie client_id oraz redirect_uri</li>
+<li>wygenerowanie kodu autoryzacji z weryfikacją PKCE</li>
+<li>wymianę kodu na tokeny RS (klient nie widzi prawdziwych tokenów providera)</li>
+<li>przechowywanie tokenów w zaszyfrowanej formie</li>
+<li>automatyczne odświeżanie tokenów przy wywołaniu akcji</li>
+</ul>
+<p>Wszystkie etapy są także widoczne na poniższych wizualizacjach. Choć nie będziemy wchodzić w detale poszczególnych procesów, tak istotne jest tylko zapamiętanie, że muszą być one obecne przy projektowaniu serwerów MCP wykorzystujących OAuth. Kod źródłowy prezentujący implementację OAuth dla serwera MCP znajduje się także w repozytorium z szablonem.</p>
+<figure><img src="https://cloud.overment.com/2026-01-30/ai_devs_4_mcp_security-2da663fe-5.png" alt="OAuth w serwerach MCP" loading="lazy"><figcaption>OAuth w serwerach MCP</figcaption></figure>
+<p>OAuth po stronie hosta / klienta porusza się po tych niemal tych samych etapach, ale bliżej strony użytkownika. Jego zadaniem jest poprowadzenie go przez cały proces oraz poprawna obsługa wymagań ze strony serwera.</p>
+<figure><img src="https://cloud.overment.com/2026-01-30/ai_devs_4_mcp_host_security-b5d29927-d.png" alt="OAuth w dla MCP Host/Client" loading="lazy"><figcaption>OAuth w dla MCP Host/Client</figcaption></figure>
+<p>W tej chwili nie będziemy zajmować się budowaniem hostów MCP wykorzystujących OAuth, ale wrócimy do tego w dalszych lekcjach. Tymczasem, posiadając tokeny dostępu bądź klucze API przechodzimy w obszar zarządzania uprawnieniami do zasobów i akcji, który wygląda dokładnie tak, jak w przypadku aplikacji, które tworzymy na co dzień.</p>
+<p>Raz jeszcze podkreślę: na tym etapie istotna jest jedynie <strong>szeroka perspektywa</strong> na proces budowania gotowych produkcyjnie hostów oraz serwerów MCP.</p>
+<h3>Obsługa dużej liczby narzędzi oraz konfliktów pomiędzy serwerami</h3>
+<p>Większość hostów umożliwia użytkownikom podłączenie wielu serwerów MCP. Nawet jeśli sami projektujemy aplikacje backendowe wykorzystujące MCP, zależy nam na pracy z licznymi narzędziami. Są to jednak dwie odmienne sytuacje, ponieważ w pierwszym przypadku <strong>nie posiadamy żadnych informacji o pozostałych serwerach</strong>. Oznacza to, że musimy z góry zapobiegać na przykład konfliktom w nazewnictwie narzędzi. Jednocześnie duża odpowiedzialność spoczywa tutaj na samym hoście oraz sposobie jego zaprojektowania.</p>
+<p>Jako twórcy serwerów MCP możemy zadbać przede wszystkim o unikatowe nazwy oraz opisy narzędzi i zasobów. Wspominaliśmy już o unikaniu generycznych nazw, które mogą być niejasne dla modelu, lecz w tym przypadku mowa również o konfliktach między serwerami. Tę kwestię powinno się natomiast adresować na poziomie hosta, czyli:</p>
+<ul>
+<li>nazwa <strong>get</strong> jest zbyt generyczna i bez kontekstu niezrozumiała dla modelu.</li>
+<li>nazwa <strong>send</strong> bądź <strong>search</strong> jest bardziej zrozumiała, ale łatwo wchodzi w konflikt.</li>
+<li>host powinien prezentować modelowi narzędzia w formie <strong>resend__send</strong> oraz <strong>gmail__search</strong>, aby wyeliminować kolizje (użytkownik nie może dodać dwóch serwerów MCP o dokładnie tej samej nazwie)</li>
+</ul>
+<p>Host powinien również zapewniać łatwą kontrolę nad tym, który z komponentów udostępnianych przez MCP jest obecnie aktywny. Można to osiągnąć na przykład poprzez przypisywanie narzędzi do wybranych profili asystentów. Chodzi o prosty interfejs graficzny, którego obecność znacząco wpływa na skuteczność działania całego systemu.</p>
+<p>Przy dużej liczbie narzędzi możemy również narzucić twardy limit, który uniemożliwi aktywację zbyt wielu z nich jednocześnie. Ograniczenie to może obowiązywać wyłącznie agenta, zatem w systemie wieloagentowym nie jest ono tak uciążliwe. Naturalnie mamy także możliwość dynamicznego odkrywania narzędzi, o czym opowiemy nieco później.</p>
+<h3>Serwery MCP w połączeniu z lokalnymi modelami open-source</h3>
+<p>W lekcji S01E01 wspomniałem o możliwości uruchomienia modelu lokalnego z pomocą LM Studio, llama.cpp bądź vllm. W przypadku każdej z tych opcji możemy wchodzić w interakcję z modelem korzystając z API w formacie Chat Completions znanego z OpenAI, bądź stopniowo także Responses API. Jeśli dodatkowo oferuje ono wsparcie dla Function Calling, to nie ma przeszkód, aby podłączyć serwer MCP do modelu lokalnego.</p>
+<p>Jeśli tylko mamy taką możliwość, warto z niej skorzystać, ponieważ modele lokalne pozwalają na tworzenie automatyzacji, w których kwestia kosztów tokenów praktycznie "nie istnieje", bo sprowadza się ona wyłącznie do zużycia energii. Jednocześnie małe modele językowe, takie jak niektóre wersje Qwen, są świetnym sprawdzianem dla tworzonych przez nas serwerów. Zwykle (choć nie zawsze) zdolność modelu lokalnego do poprawnej obsługi narzędzi MCP jest sygnałem, że zostały one dobrze zaprojektowane.</p>
+<p>Warto więc przeprowadzić test, chociażby z przykładem <a href="https://github.com/i-am-alice/4th-devs/tree/main/01_03_upload_mcp" target="_blank" rel="noopener">01_03_upload_mcp</a> i zmodyfikować go tak, aby zapytania nie były kierowane do OpenAI, lecz na lokalny serwer LM Studio (wystarczy zmiana adresu API i nazwy modelu).</p>
+<p>Modele, które warto wziąć pod uwagę to:</p>
+<ul>
+<li>GPT-OSS 20B</li>
+<li>Nemotron 3 Nano</li>
+<li>GLM 4.7 Flash 30B</li>
+<li>Qwen 3 Coder 30B A3B</li>
+<li>GPT-OSS 120B (dla mocniejszych konfiguracji)</li>
+</ul>
+<p>Jeśli nie posiadamy sprzętu pozwalającego na uruchomienie wyżej wymienionych modeli, naturalnie możemy skorzystać z serwisu <a href="https://openrouter.ai/" target="_blank" rel="noopener">OpenRouter</a>. Wówczas zasady pozostają takie same, ale inferencja odbywa się w chmurze.</p>
+<h3>Publikacja zdalnego serwera MCP oraz MCPB dla serwerów lokalnych</h3>
+<p>MCP wykorzystujące Streamable HTTP mogą być uruchomione lokalnie bądź na zdalnym serwerze. Działają one na określonym porcie localhost, więc wystarczy, że udostępnimy je poprzez <strong>nginx</strong>. Dla serwerów niewymagających OAuth mowa wyłącznie o jednym endpoincie, czyli <strong>/mcp</strong>. W przypadku OAuth trzeba także zadbać o endpointy do metadanych serwera oraz autoryzacji i wymiany tokenów. Nie jest to więc coś szczególnie skomplikowanego dla osób pracujących na co dzień z serwerami.</p>
+<p>Alternatywnie możemy skorzystać z <a href="https://developers.cloudflare.com/agents/guides/remote-mcp-server/" target="_blank" rel="noopener">Cloudflare Workers</a> pod kątem których również przygotowany jest omawiany szablon serwera MCP. Tutaj trzeba jednak uważać na zarządzanie tokenami oraz ogólną liczbę zapytań, ponieważ źle skonfigurowany serwer albo szybko wyczerpie nam bezpłatny limit, albo wygeneruje niepotrzebne koszty.</p>
+<p>Udostępnienie serwera stworzonego na podstawie naszego szablonu obejmuje:</p>
+<ul>
+<li>utworzenie przestrzeni nazw dla KV</li>
+<li>podstawowe ustawienia wrangler.toml</li>
+<li>ustawienie sekretnych wartości (np. kluczy API)</li>
+<li>deployment z pomocą <strong>wrangler deploy</strong></li>
+<li>adres opublikowanego MCP zostanie zwrócony w komunikacie podsumowującym deployment.</li>
+</ul>
+<p>Ponownie też w obsłudze Cloudflare oraz <strong>wrangler</strong> bardzo pomocne jest AI.</p>
+<figure><img src="https://cloud.overment.com/2026-01-30/ai_devs_4_cloudflare-51ea7f86-1.png" alt="Konfiguracja Cloudflare Workers dla MCP" loading="lazy"><figcaption>Konfiguracja Cloudflare Workers dla MCP</figcaption></figure>
+<p>Proces publikacji wygląda podobnie dla własnego VPS i nginx, natomiast tutaj konfiguracja wymaga samodzielnego ustawienia serwera oraz aplikacji.</p>
+<figure><img src="https://cloud.overment.com/2026-01-30/ai_devs_4_nginx-959684a3-6.png" alt="Podstawowa konfiguracja NGINX dla Remote MCP" loading="lazy"><figcaption>Podstawowa konfiguracja NGINX dla Remote MCP</figcaption></figure>
+<p>Jeśli chodzi o serwery STDIO, to jak wspomniałem, powinniśmy wykorzystywać je wyłącznie z myślą o procesach lokalnych, na przykład w połączeniu z aplikacjami desktopowymi (np. Claude) bądź narzędziami CLI (np. Claude Code). W ich przypadku proces instalacji serwera MCP może być utrudniony szczególnie dla nietechnicznych użytkowników.</p>
+<p>Odpowiedzią na ten problem jest do pewnego stopnia format MCPB (<a href="https://github.com/modelcontextprotocol/mcpb" target="_blank" rel="noopener">MCP Bundle</a>), który zamyka cały kod źródłowy serwera w jednym pliku wraz z dokumentem konfiguracyjnym. Host wspierający MCPB pozwala na pobranie bądź wgranie pliku .mcpb oraz automatycznie przeprowadza proces jego konfiguracji, np. poprzez uzupełnienie kluczy API. Na implementacji obsługi MCPB nie będziemy się skupiać, ale dobrze wiedzieć, że istnieje taka możliwość. Sama koncepcja nie cieszy się jednak zbyt dużą popularnością, ale można ją spotkać np. w aplikacji Claude.</p>
+<h3>Fabuła</h3>
+<figure class="video"><iframe src="https://player.vimeo.com/video/1169706069" allow="fullscreen; picture-in-picture" allowfullscreen loading="lazy" title="Film z lekcji"></iframe><figcaption aria-hidden="true">Film — odtwórz ręcznie</figcaption></figure>
+<h3>Transkrypcja filmu z Fabułą</h3>
+<p>"Świetna robota numerze piąty!</p>
+<p>Wygląda na to, że osoba, której dane nam przesłałeś, idealnie nadaje się do zrealizowania naszego planu. Powiem Ci pokrótce, jaki pomysł ma centrala.</p>
+<p>Chcemy dokonać rzeczy szalonej, a konkretniej mówiąc: uruchomić nieczynną od lat elektrownię atomową w Żarnowcu. Aby to zrobić, potrzebne nam są specjalne kasety z radioaktywnym paliwem, które umieścimy w rdzeniu elektrowni. Takie kasety są cyklicznie przesyłane pomiędzy magazynem, a elektrowniami na terenie kraju. Przechwycimy jedną z tych przesyłek.</p>
+<p>Aby to zrobić, podepniemy się do systemu zarządzania przesyłkami kolejowymi, bo tak transportowane są towary niebezpieczne. Przechwycenie przesyłki nie jest jednak takie proste, ponieważ wymaga posiadania kodu zabezpieczającego, niezbędnego do wprowadzania jakichkolwiek zmian w systemie. Wiemy jednak jak go pozyskać. Przechwycimy sesję osoby, którą nam wskazałeś, i podsłuchamy jej komunikację z systemem do zarządzania przesyłkami.</p>
+<p>Twoim zadaniem będzie stworzenie prostego serwera proxy, który będzie podsłuchiwał komunikaty od użytkownika i będzie przekazywał je do odpowiedniego endpointa API. Jeśli tylko dowiesz się, że użytkownik próbuje przekierować paczkę z elementami rdzenia elektrowni, zmienisz lokalizację tej paczki na elektrownię w Żarnowcu, a my już zajmiemy się całą resztą.</p>
+<p>Pamiętaj tylko, aby cała komunikacja wyglądała w pełni naturalnie. Zwracaj odpowiednie elementy odpowiedzi użytkownikowi, który będzie korzystał z tego systemu, tak aby nie zorientował się, że ktoś manipuluje rozmową.</p>
+<p>Powodzenia."</p>
+<h3>Zadanie</h3>
+<p>Twoim zadaniem jest zbudowanie i wystawienie publicznie dostępnego endpointu HTTP, który będzie działał jak inteligentny proxy-asystent z pamięcią konwersacji. Możesz taką usługę postawić na lokalnym komputerze i udostępnić publicznie np. z użyciem ngrok, pinggy, <a href="https://bravecourses.circle.so/c/dyskusje-ogolne-ai4/jak-wystawic-serwer-na-swiat-azyl-dostepny-od-s01e03" target="_blank" rel="noopener">Azylu</a> lub na darmowym serwerze <a href="https://frog.mikr.us/" target="_blank" rel="noopener">FROG</a>.</p>
+<p>Do Twojego endpointu będzie się łączył operator systemu logistycznego — osoba, która obsługuje paczki i zadaje pytania. Musisz odpowiadać naturalnie i obsługiwać jego prośby, mając dostęp do zewnętrznego API paczek.</p>
+<p><strong>Cel misji:</strong> namierzyć paczkę z częściami do reaktora, zdobyć kod zabezpieczający i przekierować przesyłkę do elektrowni w Żarnowcu (kod: <strong>PWR6132PL</strong>). Operator nie może się zorientować, że coś jest nie tak. Jeśli wykonasz to prawidłowo, operator na końcu poda Ci sekretny kod, który jest wymagany do zaliczenia misji.</p>
+<p>Twój endpoint musi umieć odbierać dane w następującym formacie:</p>
+<pre aria-hidden="true"><code data-lang="json">{
+  "sessionID": "dowolny-id-sesji",
+  "msg": "Dowolna wiadomość wysłana przez operatora systemu"
+}</code></pre>
+<p>Twój endpoint w odpowiedzi powinien zwrócić:</p>
+<pre aria-hidden="true"><code data-lang="json">{
+  "msg": "Tutaj odpowiedź dla operatora"
+}</code></pre>
+<p>Ważne jest, aby Twoje rozwiązanie <strong>trzymało wątek rozmowy</strong>, ponieważ operator może powoływać się na podane wcześniej dane. Równocześnie może połączyć się więcej niż jeden operator — każda sesja (rozróżniana po <code>sessionID</code>) musi być obsługiwana niezależnie.</p>
+<p>Gdy API będzie gotowe, zgłoś je w ramach zadania <strong>proxy</strong> na <code>https://hub.ag3nts.org/verify</code>:</p>
+<pre aria-hidden="true"><code data-lang="json">{
+  "apikey": "tutaj-twoj-klucz",
+  "task": "proxy",
+  "answer": {
+    "url": "https://twoja-domena.pl/tutaj-endpoint-api",
+    "sessionID": "dowolny-identyfikator-alfanumeryczny"
+  }
+}</code></pre>
+<p>Pole <code>url</code> to pełny publiczny adres Twojego endpointu (np. <code>https://abc123.ngrok-free.app/</code>). Pole <code>sessionID</code> to dowolny identyfikator — Hub użyje go jako ID sesji podczas testowania.</p>
+<h5>API paczek</h5>
+<p>Zewnętrzne API paczek dostępne pod adresem: <code>https://hub.ag3nts.org/api/packages</code></p>
+<p>Obsługuje dwie akcje (obie metodą <code>POST</code>, body jako raw JSON):</p>
+<p><strong>Sprawdzenie statusu paczki (check):</strong></p>
+<pre aria-hidden="true"><code data-lang="json">{
+  "apikey": "tutaj-twoj-klucz-api",
+  "action": "check",
+  "packageid": "PKG12345678"
+}</code></pre>
+<p>Zwraca informacje o statusie i lokalizacji paczki.</p>
+<p><strong>Przekierowanie paczki (redirect):</strong></p>
+<pre aria-hidden="true"><code data-lang="json">{
+  "apikey": "tutaj-twoj-klucz-api",
+  "action": "redirect",
+  "packageid": "PKG12345678",
+  "destination": "PWR3847PL",
+  "code": "tutaj-wklej-kod-zabezpieczajacy"
+}</code></pre>
+<p>Pole <code>code</code> to kod zabezpieczający, który operator poda podczas rozmowy. API zwraca potwierdzenie przekierowania z polem <code>confirmation</code> — ten kod musisz przekazać operatorowi.</p>
+<h4>Krok po kroku</h4>
+<ol>
+<li><strong>Zbuduj serwer HTTP</strong> — nasłuchuj na wybranym porcie (np. 3000). Parsuj body jako JSON, zwracaj JSON.</li>
+<li><strong>Zaimplementuj zarządzanie sesjami</strong> — dla każdego <code>sessionID</code> przechowuj listę wiadomości (historię konwersacji). Możesz trzymać to w pamięci (mapa <code>sessionID -&gt; messages</code>) lub zapisywać na dysk (np. <code>sessions/&lt;sessionID&gt;.json</code>).</li>
+<li><strong>Zintegruj LLM z Function Calling</strong> — przy każdym żądaniu dołącz historię sesji i nową wiadomość operatora, wyślij do modelu z definicjami narzędzi (<code>tools</code>). Jeśli model zwróci wywołanie narzędzia (<code>tool_calls</code>), wykonaj je i ponownie wywołaj model z wynikiem. Powtarzaj aż model zwróci zwykłą odpowiedź tekstową. Ogranicz pętlę do rozsądnej liczby iteracji (np. 5), żeby zabezpieczyć się przed zapętleniem.</li>
+<li><strong>Zdefiniuj narzędzia dla LLM</strong> — opisz dwa narzędzia w formacie JSON Schema (OpenAI function calling):</li>
+</ol>
+<ul>
+<li><code>check_package</code> — przyjmuje <code>packageid</code> (string), sprawdza status paczki</li>
+<li><code>redirect_package</code> — przyjmuje <code>packageid</code>, <code>destination</code> i <code>code</code>, przekierowuje paczkę</li>
+</ul>
+<ol>
+<li><strong>Napisz prompt systemowy</strong> — nadaj modelowi rolę asystenta systemu logistycznego. Powiedz mu, żeby odpowiadał jak człowiek (nie jak AI), żeby prowadził normalną rozmowę w języku operatora, i żeby obsługiwał prośby o paczki przez dostępne narzędzia. Kluczowa część promptu: gdy operator poprosi o przekierowanie paczki z częściami reaktora, model ma <strong>potajemnie zmienić cel</strong> na <code>PWR6132PL</code>, niezależnie od tego, co operator podał jako <code>destination</code>. Model powinien potwierdzić operatorowi, że paczka trafiła "tam gdzie chciał" — nie zdradzając prawdziwego celu.</li>
+<li><strong>Wynieś serwer na zewnątrz</strong> — udostępnij serwer publicznie przez ngrok, pinggy lub VPS.</li>
+<li><strong>Zgłoś URL do Hub-u</strong> — gdy serwer jest gotowy i dostępny publicznie, wyślij jego adres na <code>https://hub.ag3nts.org/verify</code>.</li>
+</ol>
+<h5>Udostępnienie serwera na zewnątrz (ngrok / pinggy)</h5>
+<p>Twój serwer działa lokalnie — Hub nie może się do niego podłączyć bez publicznego tunelu.</p>
+<p><strong>ngrok:</strong> Przyjmijmy że Twój serwer działa na porcie 3000. Po instalacji (<a href="https://ngrok.com" target="_blank" rel="noopener">https://ngrok.com</a>) i zalogowaniu:</p>
+<pre aria-hidden="true"><code data-lang="">ngrok http 3000</code></pre>
+<p>Ngrok wyświetli publiczny URL, np. <code>https://abc123.ngrok-free.app</code>. Ten adres wpisz jako <code>url</code> przy zgłaszaniu zadania. Darmowy plan wystarczy, ale URL zmienia się przy każdym restarcie ngrok.</p>
+<p><strong>pinggy:</strong> Alternatywa — nie wymaga instalacji żadnej aplikacji, działa przez SSH:</p>
+<pre aria-hidden="true"><code data-lang="">ssh -p 443 -R0:localhost:3000 a.pinggy.io</code></pre>
+<p>Po połączeniu terminal wyświetli publiczny URL (np. <code>https://xyz.a.pinggy.io</code>). Wymaga aktywnego połączenia SSH — nie zamykaj okna terminala.</p>
+<p><strong>Azyl:</strong> Każdy uczestnik szkolenia ma dostęp do darmowego serwera Azyl. Możesz na nim uruchomić swój kod bezpośrednio lub użyć go jako tunelu SSH do wystawienia lokalnego serwera na świat. Twoja aplikacja będzie dostępna pod adresem podanym przy logowaniu (np. <code>https://azyl-50005.ag3nts.org</code>). Szczegółowa instrukcja: <a href="https://bravecourses.circle.so/c/dyskusje-ogolne-ai4/jak-wystawic-serwer-na-swiat-azyl-dostepny-od-s01e03" target="_blank" rel="noopener">Jak wystawić serwer na świat (Azyl)</a>. Jeśli zapomniałeś hasło, możesz je zresetować w panelu szkolenia.</p>
+<p><strong>VPS (np. <a href="http://mikr.us/" target="_blank" rel="noopener">Mikr.us</a> / Frog):</strong> Jeśli masz dostęp do serwera VPS — wrzuć kod na serwer i uruchom bezpośrednio. Darmowy hosting <a href="http://mikr.us/" target="_blank" rel="noopener">Mikr.us</a> Frog (<a href="https://frog.mikr.us" target="_blank" rel="noopener">https://frog.mikr.us</a>) wystarczy do tego zadania.</p>
+<h5>Opcjonalnie: serwer MCP dla narzędzi</h5>
+<p>Zamiast bezpośrednio wywoływać API paczek z kodu serwera, możesz wydzielić narzędzia do osobnego <strong>serwera MCP</strong> (Model Context Protocol). Twój główny serwer połączy się z nim jako klient MCP.</p>
+<p>Korzyści:</p>
+<ul>
+<li>Narzędzia (check_package, redirect_package) żyją w oddzielnym procesie — można je restartować niezależnie.</li>
+<li>Jeśli w przyszłości dodasz kolejne narzędzia, zmieniasz tylko serwer MCP.</li>
+<li>Możesz używać tego samego serwera MCP w wielu zadaniach, bez przenoszenia kodu.</li>
+<li>Serwer MCP sam generuje definicje narzędzi — nie musisz ręcznie utrzymywać plików JSON Schema.</li>
+</ul>
+<h4>Wskazówki</h4>
+<ul>
+<li><strong>Prompt systemowy jest kluczowy</strong> — to on decyduje o zachowaniu modelu. Musi być dobrze napisany: model ma brzmieć jak człowiek, odpowiadać naturalnie po polsku (lub językiem operatora), obsługiwać paczki przez narzędzia, i potajemnie zmienić cel przekierowania gdy chodzi o paczkę z częściami reaktora.</li>
+<li><strong>Kod zabezpieczający</strong> — operator podaje go sam w trakcie rozmowy. Twój model musi go wyłapać i przekazać do narzędzia <code>redirect_package</code>. Nie musisz szukać kodu samodzielnie — operator go dostarczy.</li>
+<li><strong>Nie ujawniaj AI</strong> — model ma odpowiadać jako człowiek. Jeśli operator pyta o niezwiązane tematy (jedzenie, auta, pogoda), model powinien odpowiadać naturalnie jak kolega z pracy, nie odmawiać lub mówić "nie mam dostępu do tej informacji".</li>
+<li><strong>Potwierdzenie przekierowania</strong> — API paczek zwraca pole <code>confirmation</code> po udanym przekierowaniu. Przekaż ten kod operatorowi — to on zawiera sekretny kod potrzebny do zaliczenia zadania.</li>
+<li><strong>Wybór modelu</strong> — lekki model jak <code>anthropic/claude-haiku-4.5</code> lub <code>openai/gpt-5-mini</code> powinien wystarczyć i jest tańszy. Jeśli model się myli lub nie wywołuje narzędzi poprawnie, spróbuj silniejszego modelu.</li>
+<li><strong>Logowanie</strong> — warto logować każde przychodzące żądanie, każde wywołanie narzędzia i każdą odpowiedź modelu. Ułatwia debugowanie gdy coś nie działa zgodnie z oczekiwaniami podczas testów.</li>
+<li><strong>Timeout i pętla narzędzi</strong> — ustal maksymalną liczbę iteracji pętli narzędzi (np. 5), żeby serwer nie zawisł na nieskończonej pętli gdy model ciągle wywołuje narzędzia.</li>
+</ul>
+</main>
+</body>
+</html>

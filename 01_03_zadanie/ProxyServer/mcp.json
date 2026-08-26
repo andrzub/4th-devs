@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "packages": {
+      "command": "dotnet",
+      "args": ["exec", "PackagesMcpServer/bin/Debug/net10.0/PackagesMcpServer.dll"],
+      "workingDirectory": ".",
+      "env": {
+        "AI_DEVS_API_KEY": ""
+      }
+    }
+  }
+}

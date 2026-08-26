@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ProxyServer/ProxyServer.csproj" />
+  <Project Path="PackagesMcpServer/PackagesMcpServer.csproj" />
+</Solution>
