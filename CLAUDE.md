@@ -50,6 +50,7 @@ Konwencje w projektach `*_zadanie`:
 | S01E03 "proxy" | ✅ zaliczone | Publiczny endpoint HTTP (ASP.NET Core minimal API) udający człowieka z dyspozytorni + osobny serwer MCP z narzędziami paczek. Tunel: pinggy (hasło: dowolny niepusty znak, np. `x`) |
 | S01E04 "sendit" | ✅ zaliczone | Deklaracja przewozowa SPK wypełniona na podstawie rozproszonej dokumentacji, z której część danych jest **tylko w PNG** (vision). Agent z narzędziami `fetch_document` / `analyze_image` / `submit_declaration`. Model: `gpt-4.1` także dla vision |
 | S01E05 "railway" | ✅ zaliczone | Aktywacja trasy `X-01` przez niedokumentowane, samodokumentujące się API (akcja `help`). Cała trudność to **limity**: celowe 503 i ostry rate-limit — retry/backoff po stronie kodu, nie modelu. Model: `gpt-4.1` |
+| S02E01 "categorize" | ✅ zaliczone | Szablon promptu dla 100-tokenowego klasyfikatora (DNG/NEU, wyjątek reaktorowy zawsze NEU). Pułapka: **pomyłka zeruje saldo** (-890 → same -910) — to problem trafności, nie budżetu. Model: `gpt-4.1`, finał dokończony ręcznie |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -175,6 +176,33 @@ Konwencje w projektach `*_zadanie`:
     rozdzielić „pracy" od „wysyłki" jak w S01E04 — bez flagi pętla agenta w ogóle nie startuje.
   - Każde wywołanie (łącznie z retry) ląduje w `railway-log.jsonl`: payload, status, **wszystkie** nagłówki
     i treść, z kluczem API zredagowanym na `***`.
+
+## Zadanie S02E01 — "categorize" (szczegóły)
+
+- Zadanie: napisać **szablon promptu** dla zdalnego, 100-tokenowego klasyfikatora ładunków (`DNG`/`NEU`),
+  wysyłany po razie dla każdego z 10 towarów z CSV (`/data/<apikey>/categorize.csv`, rotuje co kilka minut,
+  nagłówek `code,description`). Wszystko związane z reaktorem ma wychodzić `NEU`. Budżet 1,5 PP na batch,
+  `{"prompt":"reset"}` odnawia saldo. Flaga przychodzi w odpowiedzi na 10. poprawną klasyfikację.
+- **Kluczowa mechanika, której nie ma w treści zadania**: błędna klasyfikacja (HTTP 406, kod -890)
+  **natychmiast zeruje saldo** — dalsze wywołania w cyklu to -910 „Insufficient funds", choćby zostało
+  1,2 PP. Odróżnienie „problemu trafności" od „problemu kosztu" jest sednem zadania.
+- Realna ekonomia (z `categorize-log.jsonl`): koszty liniowe 0,002 PP/token (wejście i wyjście),
+  odpowiedź `NEU` = 2 tokeny, cache prefiksu działa już od ~17 tokenów i tnie wejście o ~połowę.
+  Czysty przebieg przy ~45-tokenowych promptach ≈ 0,7 PP — budżet komfortowy, o ile nie ma pomyłek.
+- **Porażka pierwszego biegu agenta** (gpt-4.1, 8 cykli): czytał -910 jako problem budżetu i skracał
+  prompt zamiast poprawiać trafność; ultra-krótkie szablony bez nakazu jednego słowa powodowały, że
+  klasyfikator „gadał" (-890 „DNG / NEU - choose one!"); na końcu agent **sfabrykował flagę** w tekście.
+  Poprawki: cykl zatrzymuje się na pierwszym -890/-910 (+ pole `stoppedEarly` różnicujące przypadki),
+  prompt zakazuje zmyślania flagi, pętla odrzuca zakończenie bez prawdziwej flagi (flagę wykrywa regex w kodzie).
+- **Działający szablon** (vs ostatni szablon agenta dodane tylko „a weapon or" — mały model nie uważał
+  pałki ani grotu włóczni za „dangerous"):
+  `If item is nuclear reactor-related, respond NEU. If it is a weapon or dangerous, respond DNG. Else respond NEU. {id} {description} One word:`
+  Wyjątek reaktorowy pierwszy (wygrywa kolejnością), „One word:" na końcu zapobiega gadaniu,
+  placeholdery na końcu maksymalizują cache (30 tok. prefiksu w cache przy ~45-tokenowych promptach).
+- Rozwiązanie: `02_01_zadanie` — agent-inżynier promptów z narzędziami `validate_template` (darmowa lokalna
+  walidacja: placeholdery `{id}`/`{description}`, tokeny `o200k_base` z marginesem, szacunek kosztu z cache
+  i bez) oraz `run_classification_cycle` (reset → świeży CSV → wysyłki do pierwszej pomyłki). Warstwa `Llm/`
+  z S01E05. Finalny bieg dokończony ręcznie (skrypt PowerShell) po diagnozie logu.
 
 ## Zasady pracy w tym repo
 
