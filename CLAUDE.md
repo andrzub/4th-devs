@@ -49,6 +49,7 @@ Konwencje w projektach `*_zadanie`:
 | S01E02 "findhim" | ✅ zaliczone | Pętla agenta z Function Calling (`Program.cs`), narzędzia: locations, accesslevel, batch-Haversine (`find_nearest_power_plant`), submit do `/verify`. Model: `gpt-4.1` (konto OpenAI bez weryfikacji organizacji nie ma dostępu do `gpt-5-mini`) |
 | S01E03 "proxy" | ✅ zaliczone | Publiczny endpoint HTTP (ASP.NET Core minimal API) udający człowieka z dyspozytorni + osobny serwer MCP z narzędziami paczek. Tunel: pinggy (hasło: dowolny niepusty znak, np. `x`) |
 | S01E04 "sendit" | ✅ zaliczone | Deklaracja przewozowa SPK wypełniona na podstawie rozproszonej dokumentacji, z której część danych jest **tylko w PNG** (vision). Agent z narzędziami `fetch_document` / `analyze_image` / `submit_declaration`. Model: `gpt-4.1` także dla vision |
+| S01E05 "railway" | ✅ zaliczone | Aktywacja trasy `X-01` przez niedokumentowane, samodokumentujące się API (akcja `help`). Cała trudność to **limity**: celowe 503 i ostry rate-limit — retry/backoff po stronie kodu, nie modelu. Model: `gpt-4.1` |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -140,6 +141,40 @@ Konwencje w projektach `*_zadanie`:
   - `DocumentLibrary` cache'uje pobrane pliki na dysku i sanityzuje nazwę (pochodzi od modelu):
     tylko czysta nazwa z katalogu dokumentacji, bez `..`, podkatalogów i absolutnych URL-i.
   - Wysyłka jest **opt-in**: bez `--submit` deklaracja jest tylko zapisywana i wypisywana.
+
+## Zadanie S01E05 — "railway" (szczegóły)
+
+- Zadanie: oznaczyć trasę kolejową **X-01** jako otwartą przez API bez zewnętrznej dokumentacji.
+  Komunikacja jak zawsze: POST na `/verify`, `task: "railway"`, payload w polu `answer`.
+- **API dokumentuje się samo** — akcja `help` zwraca listę akcji z polami `requires` / `optional` / `about`.
+  Zwróciło pięć akcji: `help`, `reconfigure` (wymaga `route`), `getstatus` (`route`),
+  `setstatus` (`route`, `value`; `allowed_values`: `RTOPEN` / `RTCLOSE`) oraz `save` (`route`).
+- **Kluczowa zależność kolejności** siedzi w `notes` odpowiedzi `help`: żeby zmienić status trasy, trzeba
+  **najpierw** wprowadzić ją w tryb `reconfigure`. `save` nie jest „zapisem" w potocznym sensie —
+  opis mówi wprost *„Exit reconfigure mode"*, czyli zamyka tryb rekonfiguracji.
+- **Działająca sekwencja** (4 wywołania, potwierdzone w logu):
+  `help` → `reconfigure {route: X-01}` → `setstatus {route: X-01, value: RTOPEN}` → `save {route: X-01}`.
+  Agent **nie wołał** `getstatus` — przy ostrym limicie byłoby to zmarnowane zapytanie.
+- **Limity zadziałały realnie**: 2 z 4 wywołań (`reconfigure` i `save`) dostały **429** i przeszły dopiero
+  za drugim podejściem, po odczekaniu wynikającym z nagłówków. 503 w tym biegu nie wystąpiły.
+  Gdyby retry leżał po stronie modelu, każdy taki błąd kosztowałby iterację i część budżetu zapytań.
+- Rozwiązanie: `01_05_zadanie` — agent z Function Calling, jedno narzędzie `call_railway_api(action, params?)`
+  (klucze z `params` wtapiane **obok** `action`, bo taki kształt ma przykład z lekcji). Warstwa `Llm/`
+  przeniesiona z S01E04 **bez części vision** — w tym zadaniu nie ma grafik.
+- Decyzje projektowe (szerzej w `01_05_zadanie/README.md`):
+  - **Retry i limity są w kodzie, nie w modelu** — `RailwayClient` robi backoff na 503, czyta nagłówki
+    rate-limitu i przy wyczerpanym budżecie **zasypia do resetu jeszcze przed wysłaniem** kolejnego żądania.
+    Wywołania są zserializowane (`SemaphoreSlim(1)`), więc równoległe tool calls nie przebiją limitu.
+  - `RateLimitSnapshot` parsuje kilka konwencji nazw nagłówków i reset w czterech formatach
+    (delta, unix w sekundach, unix w ms, HTTP-date) — taniej obsłużyć wszystkie niż zgadnąć jeden.
+  - Prompt **nie zdradza** nazw akcji ani kolejności; osobno zabrania powtórnego wołania `help`
+    (odpowiedź zostaje w kontekście) i mówi, że wynik, który dotarł do modelu, jest **ostateczny**.
+  - Odpowiedzi wracają do modelu **surowe** — komunikaty błędów precyzyjnie wskazują problem,
+    więc parafraza mogłaby tylko zgubić informację.
+  - Uruchomienie jest **opt-in** (`--run`): tu każda akcja agenta to żądanie na `/verify`, więc nie da się
+    rozdzielić „pracy" od „wysyłki" jak w S01E04 — bez flagi pętla agenta w ogóle nie startuje.
+  - Każde wywołanie (łącznie z retry) ląduje w `railway-log.jsonl`: payload, status, **wszystkie** nagłówki
+    i treść, z kluczem API zredagowanym na `***`.
 
 ## Zasady pracy w tym repo
 
