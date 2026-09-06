@@ -52,6 +52,7 @@ Konwencje w projektach `*_zadanie`:
 | S01E05 "railway" | ✅ zaliczone | Aktywacja trasy `X-01` przez niedokumentowane, samodokumentujące się API (akcja `help`). Cała trudność to **limity**: celowe 503 i ostry rate-limit — retry/backoff po stronie kodu, nie modelu. Model: `gpt-4.1` |
 | S02E01 "categorize" | ✅ zaliczone | Szablon promptu dla 100-tokenowego klasyfikatora (DNG/NEU, wyjątek reaktorowy zawsze NEU). Pułapka: **pomyłka zeruje saldo** (-890 → same -910) — to problem trafności, nie budżetu. Model: `gpt-4.1`, finał dokończony ręcznie |
 | S02E02 "electricity" | ✅ zaliczone | Puzzle kablowe 3x3 odczytywane z PNG. Pierwsze zadanie z **dwoma providerami**: pętla agenta `gpt-4.1` (OpenAI), vision `gemini-3.6-flash` (Google AI Studio, darmowy) przez endpoint zgodny z OpenAI. 7 obrotów, zero zmarnowanych |
+| S02E03 "failure" | ✅ zaliczone | Kompresja dobowego logu (72,6K tokenów) do digestu ≤1500 tokenów. Agent `gpt-4.1` + subagent-skaner `gpt-4.1-mini`; zwijanie identycznych komunikatów w kodzie. 3 wysyłki agenta odrzucone (FIRMWARE), bo parafraza zgubiła `SAFETY_CHECK=pass`; 4. wysyłka ręczna po poprawce jednej linii = flaga |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -244,6 +245,48 @@ Konwencje w projektach `*_zadanie`:
   dowolnych zastosowań. Legalna darmowa alternatywa to **GitHub Models** (`https://models.github.ai/inference`,
   autoryzacja PAT-em, protokół OpenAI, limity rosną z tierem Copilota) — nadaje się pod pętlę agenta,
   ale ma limit **8K tokenów wejścia** na żądanie, więc pod paczkę 9 obrazków się nie nadaje.
+
+## Zadanie S02E03 — "failure" (szczegóły)
+
+- Zadanie: z dobowego logu elektrowni (`/data/<apikey>/failure.log`, 248 KB, 2137 linii, ~72,6K tokenów
+  `o200k_base`) zbudować digest **≤ 1500 tokenów**, jedno zdarzenie na linię, z datą `YYYY-MM-DD`, godziną
+  `HH:MM`, poziomem i identyfikatorem podzespołu. POST `/verify`, task `failure`, `answer: {logs: "...\n..."}`.
+  Odrzucenie to HTTP 400, kod **-948**: *„unable to determine what happened to device X"* — feedback wskazuje
+  jeden podzespół naraz.
+- **Kształt danych** (kluczowe dla projektu): identyfikator podzespołu **nie jest osobnym polem**, siedzi
+  w treści komunikatu (czasem dwa w jednej linii). Siedem podzespołów: `ECCS8`, `WTRPMP`, `WTANK07`,
+  `FIRMWARE`, `STMTURB12`, `PWR01`, `WSTPOOL2`. Poziomy INFO 1247 / WARN 494 / ERRO 282 / CRIT 114,
+  jedna linia co ~26 s, 06:00–21:37 jednego dnia.
+- Log jest **skrajnie powtarzalny**: tylko **90 różnych treści** (55 na WARN+), szablony INFO po 100–136
+  wystąpień; 24 komunikaty występują raz i to one są fabułą awarii. Sama deduplikacja nie wystarcza:
+  55 treści WARN+ po jednej, bez skracania, to 1872 tokeny — trzeba jeszcze selekcjonować i skracać.
+- Rozwiązanie: `02_03_zadanie` — agent `gpt-4.1` (sekcja `Agent`) + subagent-skaner `gpt-4.1-mini`
+  (sekcja `Scanner`); sekcje konfiguracji nazwane **po roli**, obie bindowane na `LlmProviderSettings`.
+  Warstwa `Llm/` z S02E02 bez vision. Parsowanie i agregacja w kodzie (`Analysis/`), narzędzia w układzie
+  czterech poziomów nawigacji z lekcji: `log_overview` (perspektywa), `list_event_types` (identyczne treści
+  zwinięte w typy zdarzeń z licznikiem i przedziałem pierwsze..ostatnie), `search_log` (grep),
+  `summarize_component` (skaner czyta wszystkie linie jednego podzespołu, zwraca oś czasu), `check_digest`,
+  `submit_logs`.
+- **`DigestValidator`** blokuje wysyłkę deterministycznie: format linii, istnienie wpisu źródłowego o tej
+  dacie/minucie/poziomie/podzespole (parafraza OK, zmyślone zdarzenia nie) oraz zachowanie znaczników
+  `klucz=wartość`. `TokenBudget`: bezpieczny limit 1400 przy twardym 1500. Flaga przez regex w `MissionState`.
+- **Przebieg (4 wysyłki)**: agent w `--run` zbudował digest (40 linii / 1215 tokenów) po przeglądzie, typach
+  zdarzeń i 7 podsumowaniach skanera (~36K tokenów poza kontekstem agenta). Trzy wysyłki (40/41/44 linii)
+  dostały **identyczny** -948 dla FIRMWARE; agent dokładał linii FIRMWARE (4→5→8) — zła diagnoza.
+- **Prawdziwa przyczyna**: parafraza zgubiła szczegół. `[14:52] [CRIT] Safety bootstrap read missing
+  environment marker SAFETY_CHECK=pass` stało się „missing marker". `SAFETY_CHECK=pass` to **jedyny znacznik
+  `klucz=wartość` w całym logu**. Przywrócenie go w jednej linii i wysyłka ręczna (`--submit`, 44 linie /
+  1341 tokenów) = HTTP 200 i flaga. Wniosek w prompcie: „compress filler words, never facts"; feedback
+  o podzespole, który już jest w digeście, to problem treści, nie liczby linii.
+- **429 od OpenAI**: kontekst agenta urósł do ~30K tokenów (podsumowania + digest powtarzany w `check_digest`
+  i `submit_logs`) i `gpt-4.1` łapał limit TPM; retry z `Retry-After` działał, ale iteracja trwała 20–40 s.
+  Mitygacje: `check_digest` zapamiętuje digest, `submit_logs` bez argumentów wysyła go przez referencję;
+  `Agent.MinSecondsBetweenRequests = 15`.
+- Tryby: `--analyze` (statystyki, bez LLM), `--check <plik>` / `--submit <plik>` (ścieżka ręczna bez LLM,
+  te same kontrole co w narzędziu agenta), `--draft` (pętla z symulowaną wysyłką, kończy się na pierwszym
+  digeście, który przejdzie kontrole), `--run`. Każdy bieg pisze do `log-cache/run-<data>/` transkrypt
+  i wysłane digesty; wysyłki w `failure-log.jsonl`.
+- Drobiazg: szablonowy `.gitignore` VS ignoruje katalogi `Logs/`, więc folder źródłowy nazywa się `Analysis/`.
 
 ## Zasady pracy w tym repo
 
