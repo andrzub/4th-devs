@@ -51,6 +51,7 @@ Konwencje w projektach `*_zadanie`:
 | S01E04 "sendit" | ✅ zaliczone | Deklaracja przewozowa SPK wypełniona na podstawie rozproszonej dokumentacji, z której część danych jest **tylko w PNG** (vision). Agent z narzędziami `fetch_document` / `analyze_image` / `submit_declaration`. Model: `gpt-4.1` także dla vision |
 | S01E05 "railway" | ✅ zaliczone | Aktywacja trasy `X-01` przez niedokumentowane, samodokumentujące się API (akcja `help`). Cała trudność to **limity**: celowe 503 i ostry rate-limit — retry/backoff po stronie kodu, nie modelu. Model: `gpt-4.1` |
 | S02E01 "categorize" | ✅ zaliczone | Szablon promptu dla 100-tokenowego klasyfikatora (DNG/NEU, wyjątek reaktorowy zawsze NEU). Pułapka: **pomyłka zeruje saldo** (-890 → same -910) — to problem trafności, nie budżetu. Model: `gpt-4.1`, finał dokończony ręcznie |
+| S02E02 "electricity" | ✅ zaliczone | Puzzle kablowe 3x3 odczytywane z PNG. Pierwsze zadanie z **dwoma providerami**: pętla agenta `gpt-4.1` (OpenAI), vision `gemini-3.6-flash` (Google AI Studio, darmowy) przez endpoint zgodny z OpenAI. 7 obrotów, zero zmarnowanych |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -203,6 +204,46 @@ Konwencje w projektach `*_zadanie`:
   walidacja: placeholdery `{id}`/`{description}`, tokeny `o200k_base` z marginesem, szacunek kosztu z cache
   i bez) oraz `run_classification_cycle` (reset → świeży CSV → wysyłki do pierwszej pomyłki). Warstwa `Llm/`
   z S01E05. Finalny bieg dokończony ręcznie (skrypt PowerShell) po diagnozie logu.
+
+## Zadanie S02E02 — "electricity" (szczegóły)
+
+- Zadanie: puzzle kablowe na planszy 3x3 — doprowadzić prąd do trzech elektrowni, obracając pola
+  (tylko 90° w prawo) tak, by układ zgadzał się ze schematem `https://hub.ag3nts.org/i/solved_electricity.png`.
+  Stan planszy to **PNG** (`/data/<apikey>/electricity.png`, reset przez `?reset=1`), a **każdy obrót
+  to osobny POST na `/verify`** z `answer: {rotate: "AxB"}`.
+- **Pierwsze zadanie z dwoma providerami naraz**: pętla agenta na OpenAI `gpt-4.1`, vision na Gemini.
+  Gemini wchodzi przez **endpoint zgodny z OpenAI** (`https://generativelanguage.googleapis.com/v1beta/openai`),
+  więc obaj providerzy dzielą jedną klasę `OpenAiCompatibleLlmClient` i różnią się wyłącznie konfiguracją
+  (`LlmProviderSettings`: klucz, base URL, model, `MinSecondsBetweenRequests`).
+- **Droga przez modele Gemini** (lekcja poleca `google/gemini-3-flash-preview`):
+  - `gemini-3-flash-preview` — free tier modelu **preview to tylko 20 zapytań na dobę**
+    (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`), nie 1500 jak dla stabilnych Flash.
+  - `gemini-2.5-flash` — **404**: „no longer available to new users".
+  - `gemini-3.6-flash` — stabilny, zadziałał i na nim zadanie zaliczone.
+- **Trzy pułapki techniczne**, każda kosztowała jeden błędny bieg:
+  - `MaxTokens = 200` przy vision **ucinało odpowiedź** — Gemini 3 to model „myślący", tokeny rozumowania
+    wliczają się w limit, więc widoczna treść kończyła się na samym ` ```json `. Rozwiązanie: bez limitu.
+  - Kafelek = jedno zapytanie spalało dobowy budżet w dwóch odczytach planszy. Rozwiązanie: **wszystkie
+    9 wycinków w jednym zapytaniu**, odpowiedź to JSON z kluczami `1x1`…`3x3` (odczyt planszy = 1 zapytanie).
+  - Gemini **nie wysyła nagłówka `Retry-After`** — sugerowany czas siedzi w treści błędu jako
+    `"retryDelay": "41s"` (`google.rpc.RetryInfo`). Klient parsuje to z body.
+- **Detekcja siatki zamiast sztywnych współrzędnych** (`BoardImageSlicer`): plansza (800x450) i schemat
+  docelowy (598x419) mają różne proporcje i marginesy. Linie siatki to wiersze/kolumny z ciągłym przebiegiem
+  ciemnych pikseli ≥35% wymiaru obrazu — tytuł i ikony elektrowni dają tylko krótkie przebiegi.
+  Kafelki skalowane 3x przed wysłaniem do modelu.
+- Reprezentacja pola: **zbiór krawędzi** U/R/D/L + nazwana forma (straight/corner/T/cross). Obrót w prawo
+  to mapowanie U→R→D→L→U opisane wprost w prompcie — porównanie z celem i liczbę obrotów wylicza **agent**
+  (podejście zalecane w lekcji), a nie kod.
+- Flagę wykrywa **regex w kodzie** (`MissionState`), jak w S02E01: pętla odmawia zakończenia bez prawdziwej
+  flagi w wyniku narzędzia (max 3 ponaglenia), a prompt zakazuje jej zmyślania.
+- **Rezultat (zaliczony)**: **7 obrotów na 5 polach** — `1x2`, `1x3`, `2x1`, `2x2` (×3), `3x1` — wszystkie
+  z odpowiedzią `Done`, flaga po ostatnim. Zero zmarnowanych obrotów, żadnego resetu.
+- Tryby uruchomienia: `--describe` (sam odczyt planszy i celu, **bez** `/verify`) i `--run` (pełna pętla).
+  Debug offline: `--slice <plik.png>` tnie lokalny obrazek na kafelki bez sieci i kluczy.
+- **Uwaga o Copilocie** (sprawdzone przy okazji): subskrypcja GitHub Copilot **nie daje** klucza API do
+  dowolnych zastosowań. Legalna darmowa alternatywa to **GitHub Models** (`https://models.github.ai/inference`,
+  autoryzacja PAT-em, protokół OpenAI, limity rosną z tierem Copilota) — nadaje się pod pętlę agenta,
+  ale ma limit **8K tokenów wejścia** na żądanie, więc pod paczkę 9 obrazków się nie nadaje.
 
 ## Zasady pracy w tym repo
 
