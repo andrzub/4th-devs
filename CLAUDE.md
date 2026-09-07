@@ -53,6 +53,7 @@ Konwencje w projektach `*_zadanie`:
 | S02E01 "categorize" | ✅ zaliczone | Szablon promptu dla 100-tokenowego klasyfikatora (DNG/NEU, wyjątek reaktorowy zawsze NEU). Pułapka: **pomyłka zeruje saldo** (-890 → same -910) — to problem trafności, nie budżetu. Model: `gpt-4.1`, finał dokończony ręcznie |
 | S02E02 "electricity" | ✅ zaliczone | Puzzle kablowe 3x3 odczytywane z PNG. Pierwsze zadanie z **dwoma providerami**: pętla agenta `gpt-4.1` (OpenAI), vision `gemini-3.6-flash` (Google AI Studio, darmowy) przez endpoint zgodny z OpenAI. 7 obrotów, zero zmarnowanych |
 | S02E03 "failure" | ✅ zaliczone | Kompresja dobowego logu (72,6K tokenów) do digestu ≤1500 tokenów. Agent `gpt-4.1` + subagent-skaner `gpt-4.1-mini`; zwijanie identycznych komunikatów w kodzie. 3 wysyłki agenta odrzucone (FIRMWARE), bo parafraza zgubiła `SAFETY_CHECK=pass`; 4. wysyłka ręczna po poprawce jednej linii = flaga |
+| S02E04 "mailbox" | ✅ zaliczone | Trzy fakty (data ataku, hasło, kod `SEC-`) ze skrzynki operatora przez API zmail. Pierwsze zadanie **wieloagentowe**: koordynator `gpt-4.1` z `delegate` + badacze `gpt-4.1-mini` ze świeżym kontekstem, blackboard z wykrywaniem konfliktów. Pułapka: ukryta wiadomość pod `rowID 0` z kodem o 35 znakach |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -287,6 +288,66 @@ Konwencje w projektach `*_zadanie`:
   digeście, który przejdzie kontrole), `--run`. Każdy bieg pisze do `log-cache/run-<data>/` transkrypt
   i wysłane digesty; wysyłki w `failure-log.jsonl`.
 - Drobiazg: szablonowy `.gitignore` VS ignoruje katalogi `Logs/`, więc folder źródłowy nazywa się `Analysis/`.
+
+## Zadanie S02E04 — "mailbox" (szczegóły)
+
+- Zadanie: ze skrzynki jednego z operatorów Systemu wyciągnąć trzy wartości i wysłać razem
+  (POST `/verify`, task `mailbox`, `answer: {date, password, confirmation_code}`): dzień planowanego
+  ataku na elektrownię (`YYYY-MM-DD`), hasło do systemu pracowniczego oraz kod potwierdzenia z ticketa
+  działu bezpieczeństwa (`SEC-` + 32 znaki = 36 znaków). Punkt wyjścia: Wiktor z ruchu oporu wysłał
+  donos z domeny `proton.me`. **Skrzynka jest cały czas w użyciu** — w trakcie pracy wpływają nowe maile.
+- API skrzynki: `POST /api/zmail`, sześć akcji z `help`: `getInbox`, `getThread`, `getMessages`,
+  `search` (operatory jak w Gmailu), `reset` (zeruje licznik zapytań) i `help`. Tryb `read_only`.
+  71 wiadomości na starcie, głównie szum korporacyjny i ruch operacyjny elektrowni.
+- Rozwiązanie: `02_04_zadanie` — pierwsze zadanie **wieloagentowe**, architektura **orchestrator**
+  z lekcji: koordynator `gpt-4.1` (`delegate` / `mission_status` / `submit_answer`) i badacze
+  `gpt-4.1-mini` ze świeżym kontekstem (`search_mail` / `get_inbox` / `get_thread` / `get_messages` /
+  `report_finding`). Sekcje konfiguracji nazwane po roli (`Coordinator`, `Researcher`), obie bindowane
+  na `LlmProviderSettings`. Warstwa `Llm/` z S02E03, `AgentLoop` wspólna dla obu ról.
+- **Koordynator nie ma ani jednego narzędzia pocztowego**, więc każdy fakt musi przyjść przez badacza,
+  a treści maili nigdy nie wchodzą do jego kontekstu. W teście dymnym trzej badacze przeczytali po
+  ~3900 tokenów wejścia, koordynator zużył 1163 na całą turę.
+- **Równoległość jest prawdziwa**: kilka `delegate` w jednej turze modelu leci przez `Task.WhenAll`,
+  a klient LLM zwalnia bramkę, gdy `MinSecondsBetweenRequests = 0`. Dostęp do skrzynki pozostaje
+  zserializowany (`SemaphoreSlim` w `ZmailClient`), więc równoległość nie przebije budżetu zapytań.
+- **Blackboard** (`MissionState`): findingi nie są nadpisywane — dwie różne wartości dla tego samego
+  faktu zostają obie w historii, `delegate` zwraca `CONFLICT`, decyzję podejmuje koordynator
+  (strategia „historia zmian + agent zarządzający" z lekcji). `MessageStore` cache'uje treści po
+  `messageID`, więc dwóch badaczy w tym samym wątku płaci za jedno pobranie.
+- **Trzy rzeczy odkryte sondowaniem API**, każda zamieniona w zabezpieczenie w kodzie:
+  - **`rowID` nie jest stabilny** — ta sama wiadomość wystąpiła jako `rowID 127`, chwilę później jako
+    `130`. Stabilny jest tylko 32-znakowy `messageID`: cache kluczuje po nim, `report_finding` odrzuca
+    dowód wskazany przez `rowID`, prompt badacza mówi o tym wprost.
+  - **Pod `rowID 0` siedzi podstawiona wiadomość** — `ids` przyjmuje też numeryczne `rowID`, więc
+    identyfikator z 32 zer trafia w wiadomość, **której nie ma w żadnym listingu**, a której kod
+    potwierdzenia ma **35 znaków zamiast 36**; treść pod tym `rowID` zmienia się między wywołaniami.
+    `MessageStore` porównuje każdą zwróconą wiadomość z tym, o co pytano, i wszystko poza tym oddaje
+    w osobnej sekcji z ostrzeżeniem „nie traktuj tego jako odpowiedzi na swoje pytanie".
+  - **API liczy zapytania** (pole `request` w `getMessages`, `reset` je zeruje) — klient prowadzi własny
+    budżet (`Mailbox:MaxZmailRequests`), pokazuje go modelowi przy każdym wyniku narzędzia i przerywa
+    bieg, gdy się skończy, zamiast dobijać się do API.
+- **Kod woła `help` na starcie biegu i wkleja surową odpowiedź do promptu każdego badacza** — gramatyka
+  wyszukiwarki pochodzi od tego, kto ją implementuje, a nie z parafrazy w prompcie (to też punkt 1
+  instrukcji zadania).
+- **Gwarancje w kodzie, nie w prompcie**: `AnswerValidator` sprawdza realną datę `YYYY-MM-DD` i długość
+  36 znaków kodu (przynęta z 35 znakami nie ma szans dojść do Huba — `report_finding` ją odrzuca);
+  zgłoszenie bez cytatu z treści, bez `messageID` albo z wartością już odrzuconą przez Huba jest
+  **odrzucane w narzędziu** i badacz szuka dalej; `submit_answer` wysyła to, co leży na blackboardzie,
+  a nie to, co model przepisze w argumentach, i ma `IsParallelSafe => false`; flagę wykrywa regex
+  w `MissionState`. Pominięte w połowie tury `tool_calls` dostają wynik „Skipped", bo API odrzuca
+  kolejne żądanie z niedopowiedzianym wywołaniem.
+- **Świadomie pominięte narzędzie `message`** z lekcji (dwukierunkowa komunikacja wstrzymująca pętlę
+  badacza): skrzynka jest tylko do czytania, briefingi są samowystarczalne, a jedyny realny przypadek
+  „brakuje mi informacji" to *nie znalazłem* — wraca do koordynatora jako raport `found=false` z listą
+  prób, a koordynator decyduje, czy ponowić, bo poczta mogła właśnie dojść.
+- Obserwacja z testu dymnego: badacz daty szukał najpierw po **angielsku** w polskiej skrzynce i dostał
+  zero trafień. Prompt dostał wprost „Query in Polish" plus uwagę, że dwa słowa to `AND`.
+- Tryby: `--help-api`, `--inbox [strona]`, `--search "<query>"`, `--thread <id>`, `--read <id>...`,
+  `--reset` (ręczne czytanie, bez LLM), `--draft` (pełna pętla, wysyłka symulowana do
+  `mailbox-cache/run-*/draft-answer.json`), `--run` (prawdziwe `/verify`),
+  `--submit --date ... --password ... --code ...` (dokończenie ręczne, jedno żądanie, bez LLM).
+  Każdy bieg pisze `mailbox-cache/run-<data>/` z transkryptem na agenta; wszystkie żądania
+  w `mailbox-log.jsonl` z kluczem zredagowanym na `***`.
 
 ## Zasady pracy w tym repo
 
