@@ -54,6 +54,7 @@ Konwencje w projektach `*_zadanie`:
 | S02E02 "electricity" | ✅ zaliczone | Puzzle kablowe 3x3 odczytywane z PNG. Pierwsze zadanie z **dwoma providerami**: pętla agenta `gpt-4.1` (OpenAI), vision `gemini-3.6-flash` (Google AI Studio, darmowy) przez endpoint zgodny z OpenAI. 7 obrotów, zero zmarnowanych |
 | S02E03 "failure" | ✅ zaliczone | Kompresja dobowego logu (72,6K tokenów) do digestu ≤1500 tokenów. Agent `gpt-4.1` + subagent-skaner `gpt-4.1-mini`; zwijanie identycznych komunikatów w kodzie. 3 wysyłki agenta odrzucone (FIRMWARE), bo parafraza zgubiła `SAFETY_CHECK=pass`; 4. wysyłka ręczna po poprawce jednej linii = flaga |
 | S02E04 "mailbox" | ✅ zaliczone | Trzy fakty (data ataku, hasło, kod `SEC-`) ze skrzynki operatora przez API zmail. Pierwsze zadanie **wieloagentowe**: koordynator `gpt-4.1` z `delegate` + badacze `gpt-4.1-mini` ze świeżym kontekstem, blackboard z wykrywaniem konfliktów. Pułapka: ukryta wiadomość pod `rowID 0` z kodem o 35 znakach |
+| S02E05 "drone" | ✅ zaliczone | Dron leci misję zarejestrowaną na `PWR6132PL`, ale ładunek spada na tamę obok. Sektor tamy ustalany **dwoma niezależnymi odczytami** mapy (histogram nasycenia w kodzie + `gemini-3.6-flash` na 12 kafelkach), pętla `gpt-4.1` rozgryza celowo przeciążone API drona. Siatka jest **3×4**, nie 3×3; sektor to `set(2,4)`. Flaga w 5. wysyłce — `flyToLocation` musi być **ostatni** |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -348,6 +349,67 @@ Konwencje w projektach `*_zadanie`:
   `--submit --date ... --password ... --code ...` (dokończenie ręczne, jedno żądanie, bez LLM).
   Każdy bieg pisze `mailbox-cache/run-<data>/` z transkryptem na agenta; wszystkie żądania
   w `mailbox-log.jsonl` z kluczem zredagowanym na `***`.
+
+## Zadanie S02E05 — "drone" (szczegóły)
+
+- Zadanie: zaprogramować przejętego drona `DRN-BMB7` tak, by poleciał misję zarejestrowaną przeciwko
+  elektrowni w Żarnowcu (`PWR6132PL`), ale **jedyny ładunek spadł na tamę obok** — woda ma trafić do
+  systemu chłodzenia. POST `/verify`, task `drone`, `answer: {instructions: [...]}`.
+  Dokumentacja API: `https://hub.ag3nts.org/dane/drone.html`, mapa: `/data/<apikey>/drone.png`.
+- **Sedno: przeciążony `set(...)`** — jedna nazwa to sześć funkcji rozpoznawanych po *kształcie*
+  argumentu: `set(3,4)` sektor lądowania, `set(4m)` wysokość, `set(1%)` moc, `set(engineON)` silniki,
+  `set(destroy)`/`set(image)`/`set(video)`/`set(return)` cele misji. Podstęp działa, bo dokumentacja
+  **rozdziela obiekt docelowy od sektora lądowania**: `setDestinationObject(ID)` to cel, który
+  rejestruje System, a `set(x,y)` to miejsce, gdzie faktycznie spada ładunek.
+- **Mapa: siatka jest 3 kolumny × 4 wiersze, nie 3×3.** Prawdopodobnie zamierzona pułapka — obraz
+  1920×929 (proporcja 2:1) z dwiema liniami pionowymi bardzo chętnie zostaje opisany jako „3×3"
+  z samego pattern-matchingu, a wskazówka z lekcji wprost chwali modele za „zliczanie kolumn i wierszy".
+  `MapGridDetector` liczy siatkę w kodzie po czystej czerwieni (`R > 150`, `R − max(G,B) > 70`,
+  pokrycie >60% wiersza/kolumny) i tnie kafelki **ściśle pomiędzy** liniami.
+- **Sektor tamy: `col2-row4` → `set(2,4)`**, ustalony **dwoma niezależnymi odczytami**, które muszą
+  się zgodzić, bo dron niesie jeden ładunek: (1) `WaterSignalAnalyzer` liczy piksele podbitej wody
+  (`B ≥ R+25`, `G ≥ R+25`, nasycenie HSV > 0,35) — **9321 z 9322 trafień w jednym sektorze**, wynik
+  stabilny przy progach 0,35–0,65; (2) `gemini-3.6-flash` dostaje wszystkie 12 kafelków w **jednym**
+  zapytaniu i sam wskazuje sektor („concrete weir with sluice gates and a crest walkway"), nie znając
+  wyniku analizy pikselowej. Rozbieżność przerywa bieg.
+- **Gwarancje w kodzie, nie w prompcie** (`InstructionValidator`): lista z `flyToLocation` musi mieć
+  dokładnie jeden `set(x,y)` równy sektorowi tamy oraz `setDestinationObject(PWR6132PL)`; formaty
+  z dokumentacji (ID obiektu, dwa słowa właściciela, LED `#RRGGBB`, wysokość 1–100 m, moc 0–100%)
+  sprawdzane lokalnie, więc **odrzucenie nie kosztuje wysyłki**; nieznane metody przechodzą, bo
+  sondowanie jest legalną strategią. Flagę wykrywa regex w `MissionState`. Guard przetestowany
+  offline na **17 przypadkach** (osobny projekt linkujący same pliki walidatora, bez sieci).
+- **Konsekwencja projektowa**: dron **utrzymuje konfigurację między żądaniami** (inaczej `hardReset`
+  nie miałby sensu), więc gdyby pozwolić budować misję przyrostowo, walidator nie wiedziałby, na co
+  naprawdę leci ładunek. Każda lista jest wysyłana jako **kompletna misja**, a prompt mówi o tym wprost.
+- Prompt (`DronePrompt`) jest **sekcyjny wg anatomii z lekcji**: `<identity>` / `<protocol>` /
+  `<mission>` / `<api>` / `<rules>` / `<limits>`. Dokumentacja trafia tam **w oryginale**
+  (`DroneManual` zamienia HTML na tekst zachowując tabelę i przykłady JSON) — parafraza rozwiązywałaby
+  za model dokładnie te kolizje nazw, które są substancją zadania.
+- Agent ma **jedno narzędzie** `send_instructions`: dokumentacja i sektor są statyczne i znane przed
+  startem pętli, więc siedzą w prompcie. Nie ma `--draft` (jedyną akcją agenta *jest* żądanie do Huba,
+  więc symulacja nie dałaby mu czego czytać) ani równoległych wywołań narzędzi.
+- Tryby: `--map` (siatka, kafelki, histogram — bez LLM i bez `/verify`), `--locate` (+ Gemini
+  i kontrola krzyżowa), `--manual` (dokumentacja tak, jak zobaczy ją agent), `--prompt` (pełny odczyt
+  terenu + wypisanie promptu systemowego bez uruchamiania pętli), `--run` (pełna pętla, prawdziwe
+  `/verify`), `--submit "instr" ...` (ręcznie, bez modelu, te same kontrole), `--refresh` wymusza
+  pobranie zamiast cache'u. Transkrypt w `drone-cache/run-<data>/`, żądania w `drone-log.jsonl`.
+- **Rezultat (zaliczony): 5 wysyłek, z czego 4 odrzucone tym samym kodem `-880`** — *„If we send the
+  drone without a return instruction, we will lose it forever"* — **mimo że `set(return)` był w liście
+  za każdym razem**. Komunikat jest mylący: prawdziwym problemem była **kolejność**. W próbach 1–4 cele
+  misji stały *po* `flyToLocation`, w próbie 5. *przed* nim. Czyli `flyToLocation` musi być **ostatnią**
+  instrukcją — dokumentacja mówi tylko, że kolejność *między celami* nie ma znaczenia, i nigdzie nie
+  wspomina, że cele trzeba ustawić przed startem lotu. Agent przez cztery próby przestawiał
+  `set(return)` względem `set(destroy)`, bo dokładnie na to wskazywał błąd.
+  Działająca lista: `setDestinationObject(PWR6132PL)`, `set(2,4)`, `set(destroy)`, `set(return)`,
+  `set(20m)`, `set(engineON)`, `flyToLocation`. Przy okazji: **`set(...%)` nie jest wymagane** —
+  zwycięska próba poszła bez ustawiania mocy. Agent nie użył `hardReset`, `selfCheck`, `setName`,
+  `setOwner`, `setLed` ani kalibracji, zgodnie z zasadą „konfiguruj tylko to, co potrzebne".
+- Zachowanie zabezpieczeń w praktyce: sektor `set(2,4)` był we **wszystkich pięciu** listach,
+  walidator ani razu nie zablokował listy poprawnej formalnie (odrzucenia przyszły z Huba, nie
+  z kodu), zużyte 5 z 15 wysyłek.
+- Drobiazg z budowy: plik zapisany przez narzędzie edycyjne dostał **bajty NUL zamiast spacji**
+  (`grep` raportował „Binary file matches", kompilacja przechodziła). Warto skanować nowe pliki
+  pod kątem `\0`, zanim się je zacommituje.
 
 ## Zasady pracy w tym repo
 
