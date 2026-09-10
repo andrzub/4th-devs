@@ -1,0 +1,38 @@
+{
+  "name": "operator-note-tone",
+  "description": "Hand-labelled statements for the only judgement the model makes in this task. Half of the cases are real notes taken verbatim from the sensor archive, half are written to probe the failure modes that matter: negation ('nothing suggests a fault condition' is healthy), vocabulary that merely names a fault, notes that mix a healthy opening with a worried ending, and text that asserts nothing at all. Roughly balanced across the three verdicts so a classifier cannot score well by favouring one of them.",
+  "cases": [
+    { "id": "real-ok-01", "source": "archive:0001", "expected": "Ok", "note": "Readings are calm and predictable, signal quality remains smooth and stable, and we keep the same operating plan for this logged checkpoint." },
+    { "id": "real-ok-02", "source": "archive:0002", "expected": "Ok", "note": "The latest report looks clean, signal quality remains smooth and stable, and I closed this check without action for this review iteration." },
+    { "id": "real-ok-03", "source": "archive", "expected": "Ok", "note": "No warning signs appeared, nothing suggests a fault condition, so I logged it as routine for this routine audit." },
+    { "id": "real-ok-04", "source": "archive", "expected": "Ok", "note": "Everything checks out, all control checks passed cleanly, and I recorded a standard pass for this routine audit." },
+    { "id": "real-ok-05", "source": "archive:2137", "expected": "Ok", "note": "The report looks completely normal. I will go to check status of all other devices." },
+    { "id": "synth-ok-06", "source": "synthetic", "expected": "Ok", "note": "OK" },
+    { "id": "synth-ok-07", "source": "synthetic", "expected": "Ok", "note": "No faults found." },
+    { "id": "synth-ok-08", "source": "synthetic", "expected": "Ok", "note": "The fault indicator lamp was tested and works correctly, so the panel is fine." },
+    { "id": "synth-ok-09", "source": "synthetic", "expected": "Ok", "note": "Values sit right in the middle of the allowed band and I signed the sheet." },
+    { "id": "synth-ok-10", "source": "synthetic", "expected": "Ok", "note": "There is no sign of abnormal activity and no escalation was triggered." },
+    { "id": "synth-ok-11", "source": "synthetic", "expected": "Ok", "note": "Second check confirmed the first one, everything within limits." },
+    { "id": "synth-ok-12", "source": "synthetic", "expected": "Ok", "note": "Reviewed the readings and approved them without comment." },
+
+    { "id": "real-problem-01", "source": "archive:0158", "expected": "Problem", "note": "The latest behavior is concerning, because the current state does not match healthy history, and I submitted it for root-cause analysis until the investigation is completed." },
+    { "id": "real-problem-02", "source": "archive:0516", "expected": "Problem", "note": "These readings look suspicious, since this shift shows unstable characteristics, so I escalated this for engineering analysis until remediation steps are verified." },
+    { "id": "real-problem-03", "source": "archive:1053", "expected": "Problem", "note": "The latest behavior is concerning, since this shift shows unstable characteristics, and I ordered an immediate quality audit before the case is closed." },
+    { "id": "real-problem-04", "source": "archive:4630", "expected": "Problem", "note": "The numbers feel inconsistent, since the reported state looks technically doubtful, so I opened a deeper diagnostic task until quality control clears it." },
+    { "id": "real-problem-05", "source": "archive:9848", "expected": "Problem", "note": "The signal profile looks unusual, since this output should be investigated immediately, and I ordered an immediate quality audit until a technician signs it off." },
+    { "id": "real-problem-06", "source": "archive:5714", "expected": "Problem", "note": "This check did not look right, since this does not pass a safety-minded review, and I scheduled a detailed anomaly check before the case is closed." },
+    { "id": "synth-problem-07", "source": "synthetic", "expected": "Problem", "note": "Broken." },
+    { "id": "synth-problem-08", "source": "synthetic", "expected": "Problem", "note": "Values look fine to me, but the trace jumped twice during the check and I could not explain it." },
+    { "id": "synth-problem-09", "source": "synthetic", "expected": "Problem", "note": "The channel reads plausible numbers, however I do not trust this unit until it is recalibrated." },
+    { "id": "synth-problem-10", "source": "synthetic", "expected": "Problem", "note": "Sensor disconnected halfway through the check." },
+    { "id": "synth-problem-11", "source": "synthetic", "expected": "Problem", "note": "I did not take any action even though the level kept drifting upwards." },
+    { "id": "synth-problem-12", "source": "synthetic", "expected": "Problem", "note": "Needs a technician before the next cycle." },
+
+    { "id": "synth-unclear-01", "source": "synthetic", "expected": "Unclear", "note": "Shift handover completed at 14:00." },
+    { "id": "synth-unclear-02", "source": "synthetic", "expected": "Unclear", "note": "Sensor identifier written into the paper register." },
+    { "id": "synth-unclear-03", "source": "synthetic", "expected": "Unclear", "note": "-" },
+    { "id": "synth-unclear-04", "source": "synthetic", "expected": "Unclear", "note": "Third check of the day." },
+    { "id": "synth-unclear-05", "source": "synthetic", "expected": "Unclear", "note": "The weather outside is cold today." },
+    { "id": "synth-unclear-06", "source": "synthetic", "expected": "Unclear", "note": "See attachment." }
+  ]
+}

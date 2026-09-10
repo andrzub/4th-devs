@@ -55,6 +55,7 @@ Konwencje w projektach `*_zadanie`:
 | S02E03 "failure" | ✅ zaliczone | Kompresja dobowego logu (72,6K tokenów) do digestu ≤1500 tokenów. Agent `gpt-4.1` + subagent-skaner `gpt-4.1-mini`; zwijanie identycznych komunikatów w kodzie. 3 wysyłki agenta odrzucone (FIRMWARE), bo parafraza zgubiła `SAFETY_CHECK=pass`; 4. wysyłka ręczna po poprawce jednej linii = flaga |
 | S02E04 "mailbox" | ✅ zaliczone | Trzy fakty (data ataku, hasło, kod `SEC-`) ze skrzynki operatora przez API zmail. Pierwsze zadanie **wieloagentowe**: koordynator `gpt-4.1` z `delegate` + badacze `gpt-4.1-mini` ze świeżym kontekstem, blackboard z wykrywaniem konfliktów. Pułapka: ukryta wiadomość pod `rowID 0` z kodem o 35 znakach |
 | S02E05 "drone" | ✅ zaliczone | Dron leci misję zarejestrowaną na `PWR6132PL`, ale ładunek spada na tamę obok. Sektor tamy ustalany **dwoma niezależnymi odczytami** mapy (histogram nasycenia w kodzie + `gemini-3.6-flash` na 12 kafelkach), pętla `gpt-4.1` rozgryza celowo przeciążone API drona. Siatka jest **3×4**, nie 3×3; sektor to `set(2,4)`. Flaga w 5. wysyłce — `flyToLocation` musi być **ostatni** |
+| S03E01 "evaluation" | ✅ zaliczone | Anomalie w 9999 odczytach czujników. Trzy z czterech definicji anomalii rozstrzyga kod (46 plików z błędnymi danymi), model odpowiada tylko na pytanie o tonację notatki operatora. Deduplikacja dwupoziomowa: 9999 → 2032 unikalne notatki → **325 unikalnych klauzul**; odpowiedź modelu to **same numery wyjątków**. Pierwsze zadanie z warstwą **observability i evals**: bramka jakości przed zbudowaniem odpowiedzi. Model: `gpt-4.1-mini` |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -410,6 +411,77 @@ Konwencje w projektach `*_zadanie`:
 - Drobiazg z budowy: plik zapisany przez narzędzie edycyjne dostał **bajty NUL zamiast spacji**
   (`grep` raportował „Binary file matches", kompilacja przechodziła). Warto skanować nowe pliki
   pod kątem `\0`, zanim się je zacommituje.
+
+## Zadanie S03E01 — "evaluation" (szczegóły)
+
+- Zadanie: w archiwum `https://hub.ag3nts.org/dane/sensors.zip` (3,6 MB) jest **9999 plików JSON**
+  (`0001`–`9999`, lekcja mówi „10 000") z odczytami czujników. Trzeba odesłać identyfikatory
+  **wszystkich** plików z anomalią — POST `/verify`, task `evaluation`, `answer: {recheck: [...]}`.
+  Cztery definicje anomalii: wartość poza normą, kanał nieaktywny raportujący dane, notatka
+  „wszystko OK" przy złych danych, notatka „są błędy" przy danych poprawnych.
+- **Podział pracy kod / model** to sedno zadania. Trzy z czterech definicji to arytmetyka na
+  zadeklarowanych zakresach: `sensor_type` mówi, które kanały są aktywne, aktywny musi mieścić się
+  w normie, nieaktywny musi zwracać dokładnie `0`. Model nie jest o to pytany ani razu. Dostaje
+  **jedno** pytanie, na które kod nie odpowie: *czy ta wypowiedź operatora twierdzi, że sprzęt jest
+  sprawny, czy że coś jest nie tak?*
+- **Warstwa deterministyczna znajduje 46 plików** — 22 wartości poza normą i 24 „duchy" (nieaktywny
+  kanał coś raportuje; najczęściej wilgotność, 12 plików). Część duchów jest podstępna, bo mieści
+  się w normie *swojego* kanału: `3123` to `humidity/pressure/temperature`, który zwraca
+  `voltage_supply_v = 230.5` — wartość całkowicie zdrową dla napięcia. Sam zakres tego nie wyłapie,
+  wyłapuje porównanie z `sensor_type`.
+- **Redukcja kosztu, trzy poziomy** (wskazówka z lekcji mówi wprost, że notatki się powtarzają):
+  - 9999 notatek to **2032 unikalne treści** (20,3 % archiwum),
+  - notatki są **szablonowe** — 2031 z 2032 to dokładnie trzy klauzule po przecinkach, dobierane
+    z trzech pul (43 otwarcia, 38 środków, 243 zakończenia); unikalnych klauzul jest **325**, czyli
+    ~11× mniej wejścia (7,4K vs 84K tokenów). Struktura jest **odkrywana w kodzie** (`NoteDecomposer`),
+    nie zaszyta na sztywno; notatka, która się nie rozkłada, idzie do modelu w całości,
+  - **kształt odpowiedzi**: output kosztuje kilka razy więcej niż input, a 98 % wypowiedzi jest
+    rutynowych, więc model zwraca **tylko numery wyjątków** (`PROBLEM: 14,37` / `UNCLEAR:`).
+    Wszystko niewymienione to `Ok`. Wyroki lądują w `ToneCache` na dysku (klucz zawiera nazwę
+    modelu), więc powtórny bieg całego pipeline'u nie kosztuje nic.
+- **Cena tego formatu i zabezpieczenie**: odpowiedź ucięta, leniwa albo pusta wygląda **identycznie**
+  jak „nic do zgłoszenia". Dlatego do każdego batcha wstrzykiwane są dwie **wypowiedzi kontrolne**
+  o znanym werdykcie (jedna awaryjna, jedna rutynowa), na pozycjach losowanych z ziarna równego
+  numerowi batcha. Model, który przestanie oznaczać podstawioną awarię albo zacznie oznaczać
+  podstawioną rutynę, dostaje batch z powrotem (do 3 prób). To ewaluacja **online**, w trakcie biegu.
+  Teksty kontrolne są spoza słownika elektrowni, więc nie zderzą się z prawdziwą notatką.
+- **Observability** (`Observability/`) odwzorowuje hierarchię z lekcji lokalnie: bieg = *session*
+  (`runId`, katalog `sensors-cache/run-<data>/`), `classify:clauses` / `eval:clauses` / `report` =
+  *trace*, każde wywołanie modelu = *generation* z własnymi tokenami, kosztem i czasem, plus *event*
+  (`run-started`, `classification-planned`, `answer-built`). Wszystko do `classification-log.jsonl`,
+  pełne treści interakcji (prompt systemowy, prompt, surowa odpowiedź, decyzja o batchu) do plików
+  katalogu biegu — materiał do Playgroundu. `UsageMeter` liczy tokeny i pieniądze per trace, razem
+  z tokenami z cache prefiksu providera (`prompt_tokens_details.cached_tokens`) po niższej stawce;
+  **cennik siedzi w `appsettings.json`**, bo taryfy zmieniają się częściej niż kod.
+- **Evals** (`Evals/note-tone.labeled.json`): 30 ręcznie oznaczonych wypowiedzi, 12 `Ok` / 12
+  `Problem` / 6 `Unclear` (balans), połowa to prawdziwe notatki z archiwum, połowa pisana pod
+  konkretne tryby porażki (pokrycie + różnorodność): negacja („nothing suggests a fault condition"
+  jest zdrowe, choć nazywa awarię), słownictwo awaryjne w zdrowym kontekście, ton mieszany, tekst
+  nieorzekający o niczym. `--evals` liczy macierz pomyłek i precision/recall/F1 na klasę.
+  **Kluczowe: `--report` uruchamia ewaluację jako bramkę i odmawia zbudowania odpowiedzi poniżej
+  progu** (domyślnie 95 %) — regresja w ocenie notatek jest niewidoczna w wyniku (lista ID wygląda
+  tak samo), a przesądza o zaliczeniu. `--skip-evals` to świadome obejście, nie domyślka.
+- `--selftest` sprawdza **offline, bez klucza i bez sieci**, całą otoczkę klasyfikatora: parsowanie
+  odpowiedzi, działanie wypowiedzi kontrolnych (w tym odrzucenie odpowiedzi, która nie flaguje nic
+  i takiej, która flaguje wszystko), dekompozycję i składanie werdyktów oraz wszystkie cztery
+  definicje anomalii na syntetycznych odczytach. **34 przypadki, zero tokenów.**
+- **Model nie jest agentem**: warstwa `Llm/` przeniesiona z S02E05 **bez function callingu** — brak
+  pętli, narzędzi i `ToolCall`. Pliki są lokalne, pytanie jest jedno i identyczne dla każdej
+  wypowiedzi, więc pętla agenta byłaby kosztem bez zysku.
+- Świadome decyzje: klasyfikowane są **wszystkie** notatki, nie tylko z plików o zdrowych danych —
+  do samej odpowiedzi wystarczyłyby te drugie (plik z błędnymi danymi jest anomalią niezależnie od
+  notatki), ale wtedy raport nie wskazałby plików, w których operator **podpisał błędny odczyt jako
+  zdrowy**, czyli dokładnie dowodu nierzetelności, o który prosi fabuła. `Unclear` przy zdrowych
+  danych **nie wchodzi do odpowiedzi** (nie pasuje do żadnej z czterech definicji), ale ląduje
+  w sekcji raportu „do spojrzenia przez człowieka".
+- **Easter egg**: `2137.json` ma jedyną nieszablonową notatkę w archiwum — *„The report looks
+  completely normal. I will go to check status of all other devices."* Dane zdrowe, notatka
+  pozytywna, więc **nie jest anomalią**. Trafiła do zbioru testowego jako przypadek brzegowy, bo
+  jako jedyna nie rozkłada się na klauzule.
+- Tryby: `--fetch`, `--analyze` (cała warstwa deterministyczna + porównanie kosztu obu tierów, bez
+  LLM), `--selftest`, `--evals`, `--classify`, `--report` (bramka + lista anomalii → `answer.json`,
+  bez wysyłki), `--submit` (jedyne wyjście na `/verify`). Opcje: `--tier clauses|notes`, `--refresh`,
+  `--skip-evals`.
 
 ## Zasady pracy w tym repo
 
