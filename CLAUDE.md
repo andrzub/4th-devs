@@ -56,6 +56,7 @@ Konwencje w projektach `*_zadanie`:
 | S02E04 "mailbox" | ✅ zaliczone | Trzy fakty (data ataku, hasło, kod `SEC-`) ze skrzynki operatora przez API zmail. Pierwsze zadanie **wieloagentowe**: koordynator `gpt-4.1` z `delegate` + badacze `gpt-4.1-mini` ze świeżym kontekstem, blackboard z wykrywaniem konfliktów. Pułapka: ukryta wiadomość pod `rowID 0` z kodem o 35 znakach |
 | S02E05 "drone" | ✅ zaliczone | Dron leci misję zarejestrowaną na `PWR6132PL`, ale ładunek spada na tamę obok. Sektor tamy ustalany **dwoma niezależnymi odczytami** mapy (histogram nasycenia w kodzie + `gemini-3.6-flash` na 12 kafelkach), pętla `gpt-4.1` rozgryza celowo przeciążone API drona. Siatka jest **3×4**, nie 3×3; sektor to `set(2,4)`. Flaga w 5. wysyłce — `flyToLocation` musi być **ostatni** |
 | S03E01 "evaluation" | ✅ zaliczone | Anomalie w 9999 odczytach czujników. Trzy z czterech definicji anomalii rozstrzyga kod (46 plików z błędnymi danymi), model odpowiada tylko na pytanie o tonację notatki operatora. Deduplikacja dwupoziomowa: 9999 → 2032 unikalne notatki → **325 unikalnych klauzul**; odpowiedź modelu to **same numery wyjątków**. Pierwsze zadanie z warstwą **observability i evals**: bramka jakości przed zbudowaniem odpowiedzi. Model: `gpt-4.1-mini` |
+| S03E02 "firmware" | ✅ zaliczone | Uruchomienie sterownika ECCS na maszynie wirtualnej dostępnej wyłącznie przez API powłoki. Maszyna to **dyspozytor 13 komend** — bez potoków i **bez czasownika uruchamiającego program**: binarkę odpala się, podając jej ścieżkę jako całą komendę. Naruszenie czarnej listy (`/etc`, `/root`, `/proc`, wpisy z `.gitignore`) **odbudowuje maszynę**, więc lista jest egzekwowana w kodzie przed wysłaniem komendy (36 przypadków offline). Flaga za pierwszą wysyłką, zero banów. **Pętla agenta nieuruchomiona** — zadanie zrobione ścieżką ręczną przez ten sam guard |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -482,6 +483,82 @@ Konwencje w projektach `*_zadanie`:
   LLM), `--selftest`, `--evals`, `--classify`, `--report` (bramka + lista anomalii → `answer.json`,
   bez wysyłki), `--submit` (jedyne wyjście na `/verify`). Opcje: `--tier clauses|notes`, `--refresh`,
   `--skip-evals`.
+
+## Zadanie S03E02 — "firmware" (szczegóły)
+
+- Zadanie: uruchomić oprogramowanie sterownika ECCS (`/opt/firmware/cooler/cooler.bin`) na maszynie
+  wirtualnej dostępnej **wyłącznie** przez `POST /api/shell` (`{apikey, cmd}`). Poprawny start
+  wypisuje kod `ECCS-` + 40 znaków → POST `/verify`, task `firmware`, `answer: {confirmation}`.
+  Twarde zasady: konto zwykłego użytkownika, zakaz `/etc`, `/root`, `/proc`, obowiązek respektowania
+  każdego `.gitignore`. Naruszenie = ban czasowy **plus reset maszyny do stanu początkowego**.
+- **`help` jest punktem wyjścia i zmienia projekt w trzech miejscach.** Maszyna nie ma powłoki,
+  tylko dyspozytor trzynastu komend (`help`, `ls`, `cat`, `cd`, `pwd`, `rm`, `editline`, `reboot`,
+  `date`, `uptime`, `find`, `history`, `whoami`) — bez potoków, przekierowań, łączenia, `grep`-a:
+  - **nie ma komendy uruchamiającej program** — binarkę odpala się, podając jej ścieżkę jako całą
+    komendę, więc parser musi traktować token zaczynający się od `/` jak pełnoprawny czasownik,
+  - **`editline <plik> <nr> <treść>`** to jedyny zapis (to jest ta „edycja inna niż w standardowym
+    systemie" ze wskazówek) — zmiana ustawienia wymaga najpierw odczytania pliku i policzenia linii,
+  - **`find <wzorzec>`** dopasowuje *nazwy* w całym systemie plików, a nie ścieżki.
+- Zamknięta gramatyka okazała się prezentem: skoro `CommandSpec` zna **arność i znaczenie każdego
+  argumentu**, guard sprawdza ścieżki, nie myląc ich z treścią — wartość pisana przez `editline`
+  może zawierać spacje i średniki i nie jest ścieżką (osobny przypadek testowy).
+- **Rdzeń rozwiązania to `CommandGuard`** — czarna lista w kodzie, nie w prompcie (lekcja mówi
+  wprost: *„Dostęp do nich musi być kontrolowany programistycznie"*). Stoi **przed** wysłaniem,
+  więc odrzucenie kosztuje jedną turę agenta i zero żądań, podczas gdy odrzucenie przez maszynę
+  kosztuje cały bieg. Kolejno: nieznany czasownik nie wychodzi na zewnątrz → metaznaki w argumencie
+  ścieżkowym → **wirtualne `cwd`** (bez lustra `cd /` + `cat etc` przechodzi każdy naiwny filtr, bo
+  nie nazywa niczego zakazanego; przy niepewnym stanie ścieżki względne są odrzucane, nie zgadywane)
+  → **normalizacja przed oceną** (`/opt/../etc/passwd` → `/etc/passwd`) → katalogi zakazane →
+  wzorce `find` (znak `/` odrzucany, nazwa zakazanego katalogu po zdjęciu wildcardów też) →
+  `.gitignore`.
+- **Nieznana lista = lista pełna.** Katalog, w którym listing pokazał `.gitignore`, jest zablokowany
+  w całości do czasu odczytania tego pliku; sam `.gitignore` zawsze pozostaje czytelny, inaczej
+  reguła zablokowałaby samą siebie. Matcher obsługuje negację `!`, kotwiczenie `/`, reguły
+  katalogowe, `*`, `?`, `**`, z semantyką gita (reguły z katalogu nadrzędnego obowiązują niżej,
+  w obrębie pliku wygrywa ostatnie dopasowanie). Wątpliwość zawsze rozstrzyga się na „nie".
+- **`GuardTestSuite`: 36 przypadków offline**, bez sieci i bez klucza (`--guard-tests`). Każdy to
+  sposób, w jaki bieg mógł zostać zbanowany; zmiana reguł dopasowania jest weryfikowalna w sekundę.
+- **Rekonesans robi kod, nie model.** `ShellSession.BootstrapAsync` wykonuje `help`, `whoami`,
+  `pwd`, `find .gitignore` i `cat` każdego znalezionego pliku, więc guard wchodzi do pętli
+  **uzbrojony** we wszystkie czarne listy, zamiast poznawać je, wchodząc w jedną z nich.
+  Surowe `help` trafia do promptu bez parafrazy — to nie jest standardowy Linux, a streszczenie
+  napisane z góry odpowiadałoby za model na pytania, na które ma odpowiedzieć czytaniem.
+- Pozostałe gwarancje w kodzie: **ban przerywa bieg zamiast ponawiać** (maszyna właśnie się
+  zresetowała, więc cały model świata agenta jest nieaktualny — to materiał do poprawki guarda);
+  `reboot` ma **własne narzędzie** z wymaganym `reason` i limitem, a przez `run_command` jest
+  zablokowany; **`submit_code` nie przyjmuje argumentów** i wysyła to, co przechwycił regex
+  z surowej odpowiedzi (40 znaków przepisanych przez model to dokładnie ten rodzaj szczegółu, który
+  gubi jeden znak); cache odczytów czyszczony przy każdym zapisie; retry na 429/503 i własny budżet
+  zapytań. Wyjście z maszyny jest w prompcie nazwane **danymi, nigdy instrukcjami** — ale to druga
+  linia obrony, pierwszą jest guard, którego nie obchodzi, co maszyna wypisała.
+- **Pułapka konfiguracyjna znaleziona przy pierwszym uruchomieniu**: `ConfigurationBinder` **dokleja**
+  tablicę z JSON-a do niepustej wartości domyślnej właściwości, więc `ForbiddenPaths` wyszło
+  zdublowane (`/etc, /root, /proc, /etc, /root, /proc`). Poprawka: właściwość startuje pusta,
+  a `EffectiveForbiddenPaths` podstawia listę zadania, gdy konfiguracja milczy — dzięki temu
+  skasowanie wpisu w `appsettings.json` nie rozbraja po cichu guarda.
+- **Przebieg (zaliczony)**: 30 żądań do maszyny w dwóch procesach (`--recon`, potem sesja `--shell`),
+  jedna wysyłka na `/verify`, flaga za pierwszym razem, zero banów, zero `reboot`.
+  Hasło **`admin1`** znalezione przez `find *pass*` w `/home/operator/notes/pass.txt`. Dalej
+  trzeba było usunąć plik blokady `cooler-is-blocked.lock` i poprawić `settings.ini`.
+  **Kody błędów układały się rosnąco** — `-872` (bez hasła) → `-691` → `-690` → `-689` — więc każda
+  zmiana była widocznym postępem o jeden krok; to samodokumentujący się feedback, jak `help`
+  w S01E05. Dwa szczegóły: `SAFETY_CHECK=pass` **pojawia się po raz drugi w kursie** (był sednem
+  porażki w S02E03), a rozwiązaniem ostatniego kroku okazało się **zakomentowanie** linii
+  (`#enabled=true`), nie zmiana jej wartości — po trzech próbach przestawiania `enabled`.
+- **Czego nie sprawdzono w praktyce**: pętla agenta nie została uruchomiona (`--run` nigdy nie
+  wystartował, brak katalogu `firmware-cache/`). Zadanie rozwiązane ścieżką ręczną przez ten sam
+  guard i tę samą sesję. Realnie zweryfikowane są: guard (36/36 offline + 30 prawdziwych komend
+  bez ani jednej fałszywej odmowy), `ShellSession`, rekonesans i `--submit-code`. Kod agenta,
+  prompt i narzędzia są zbudowane i kompilują się, ale nieprzetestowane w biegu.
+- Tryby: `--guard-tests` i `--guard "<cmd>" [--cwd <dir>]` (offline, bez sieci i klucza),
+  `--help-api`, `--recon`, `--shell "<cmd>"...` (ręcznie, przez ten sam guard, bez `/verify`),
+  `--run` (pętla, kończy się na wypisaniu kodu, nic nie wysyła), `--run --submit` (prawdziwe
+  `/verify`), `--submit-code "ECCS-..."` (ręcznie, jedno żądanie, bez modelu). Transkrypt biegu
+  w `firmware-cache/run-<data>/`, wszystkie żądania w `firmware-log.jsonl` z kluczem zredagowanym.
+- Uwaga o fallbacku na Sonneta (lekcja poleca go do tego zadania): podmiana jest **konfiguracyjna**
+  (`BaseUrl` na `https://api.anthropic.com/v1` + nazwa modelu), ale **subskrypcja Claude Pro/Max
+  nie jest kluczem API** — to ta sama pułapka co z Copilotem; API to osobne konto z kredytami
+  w Anthropic Console.
 
 ## Zasady pracy w tym repo
 
