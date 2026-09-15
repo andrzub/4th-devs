@@ -57,6 +57,7 @@ Konwencje w projektach `*_zadanie`:
 | S02E05 "drone" | ✅ zaliczone | Dron leci misję zarejestrowaną na `PWR6132PL`, ale ładunek spada na tamę obok. Sektor tamy ustalany **dwoma niezależnymi odczytami** mapy (histogram nasycenia w kodzie + `gemini-3.6-flash` na 12 kafelkach), pętla `gpt-4.1` rozgryza celowo przeciążone API drona. Siatka jest **3×4**, nie 3×3; sektor to `set(2,4)`. Flaga w 5. wysyłce — `flyToLocation` musi być **ostatni** |
 | S03E01 "evaluation" | ✅ zaliczone | Anomalie w 9999 odczytach czujników. Trzy z czterech definicji anomalii rozstrzyga kod (46 plików z błędnymi danymi), model odpowiada tylko na pytanie o tonację notatki operatora. Deduplikacja dwupoziomowa: 9999 → 2032 unikalne notatki → **325 unikalnych klauzul**; odpowiedź modelu to **same numery wyjątków**. Pierwsze zadanie z warstwą **observability i evals**: bramka jakości przed zbudowaniem odpowiedzi. Model: `gpt-4.1-mini` |
 | S03E02 "firmware" | ✅ zaliczone | Uruchomienie sterownika ECCS na maszynie wirtualnej dostępnej wyłącznie przez API powłoki. Maszyna to **dyspozytor 13 komend** — bez potoków i **bez czasownika uruchamiającego program**: binarkę odpala się, podając jej ścieżkę jako całą komendę. Naruszenie czarnej listy (`/etc`, `/root`, `/proc`, wpisy z `.gitignore`) **odbudowuje maszynę**, więc lista jest egzekwowana w kodzie przed wysłaniem komendy (36 przypadków offline). Flaga za pierwszą wysyłką, zero banów. **Pętla agenta nieuruchomiona** — zadanie zrobione ścieżką ręczną przez ten sam guard |
+| S03E03 "reactor" | ✅ zaliczone | Robot z modułem chłodzenia przez planszę 7×5 z bloczkami jeżdżącymi góra/dół. **Bloki ruszają się tylko na komendę**, a stan planszy da się czytać **za darmo** osobnym endpointem podglądu, więc patrzenie nic nie kosztuje, kosztuje dopiero ruch. Pierwszy bieg zgubił robota w **ruchomej ścianie** trzech zsynchronizowanych kolumn; poprawka to `RouteFinder` — graf stanów `(kolumna, tick mod 6)` rozstrzygany w całości, guard odrzuca ślepe zaułki. Flaga w drugim biegu, 9 komend |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -559,6 +560,65 @@ Konwencje w projektach `*_zadanie`:
   (`BaseUrl` na `https://api.anthropic.com/v1` + nazwa modelu), ale **subskrypcja Claude Pro/Max
   nie jest kluczem API** — to ta sama pułapka co z Copilotem; API to osobne konto z kredytami
   w Anthropic Console.
+
+## Zadanie S03E03 — "reactor" (szczegóły)
+
+- Zadanie: doprowadzić robota transportującego moduł chłodzenia z kolumny 1 do slotu `G` w kolumnie 7,
+  po najniższym wierszu planszy **7×5**. Sterowanie: `POST /verify`, `task: "reactor"`,
+  `answer: {command}` — **jedna komenda na żądanie** (`start`, `reset`, `left`, `wait`, `right`).
+  Bloki rdzenia mają **2 pola wysokości**, jeżdżą cyklicznie góra/dół i **ruszają się wyłącznie wtedy,
+  gdy wydasz komendę** — `wait` jest ruchem, nie pauzą.
+- **Odkrycie, które zmienia ekonomię zadania**: podgląd graficzny (`reactor_preview.html`) pobiera stan
+  z **`POST /reactor_backend.php`** (`x-www-form-urlencoded`, pole `key` = klucz AI_devs). Ten odczyt
+  **nie jest komendą** — nie rusza bloków i nie zużywa budżetu. Patrzenie na reaktor jest darmowe,
+  kosztuje dopiero ruch. Kod podglądu zdradza też pełny kształt odpowiedzi, więc parser powstał bez
+  ani jednej wysyłki na `/verify`.
+- Odpowiedź `/verify` okazała się potem **nieść tę samą planszę** (`code: 100`, `message`, `board`,
+  `blocks[] {col, top_row, bottom_row, direction}`, `player`, `goal`, `reached_goal`, `is_crushed`,
+  `flag`). Parser jest tolerancyjny (szuka `board` gdziekolwiek w odpowiedzi, przyjmuje `top_row`
+  i `topRow`, wiersze jako tablice i jako stringi, robota z `player` albo ze znacznika `P`), a sesja
+  i tak dociąga stan darmowym odczytem, gdy odpowiedź go nie niesie — obie ścieżki były gotowe zanim
+  poznaliśmy prawdziwy kształt.
+- **Podział pracy**: kod odpowiada na „czy ta komenda zabije robota?" (geometria), agent na „którą
+  z komend, które przeżyją, teraz wydać?". `MoveGuard` odrzuca ruch **przed wysłaniem**, gdy kolumna
+  docelowa jest zajęta *teraz* albo zajmie się *w tym samym ticku* — oba sprawdzenia są celowe, bo
+  dokumentacja nie mówi, czy na serwerze pierwszy rusza się robot, czy bloki.
+- **Porażka pierwszego biegu i prawdziwa nauka**: robot **nie został zgnieciony** — guard zatrzymał go
+  w pozycji bez wyjścia. Bloki w kolumnach 2, 3 i 4 jadą **zsynchronizowane**, więc schodzą na parter
+  naraz i zamykają trzy kolumny w jednym ticku. Błąd zapadł **dwa ticki wcześniej**, przy wejściu
+  w kolumnę, która wtedy była jeszcze otwarta. Guard patrzący jeden tick do przodu tego nie widzi.
+- **Poprawka — `RouteFinder`**: ruch bloków jest deterministyczny **i okresowy** (parter kolumny jest
+  zajęty jako funkcja samego ticku; okres `2 × (maxTop − minTop)` = 6), więc cała przyszłość to graf
+  `(kolumna, tick mod 6)` — **42 stany**, czyli rozmiar do rozstrzygnięcia w całości.
+  `CanSurviveFrom` to największy punkt stały (wykreślanie stanów bez wyjścia, aż zbiór przestaje się
+  kurczyć) — guard odrzuca ruch poza ten zbiór. `TicksToGoalFrom` to BFS po tym samym grafie i trafia
+  do raportu jako **informacja, nie zakaz**. Wyjątek: wejście na kolumnę celu nigdy nie jest odrzucane
+  jako ślepy zaułek — dotarcie do slotu kończy misję.
+- **Hooki wokół pętli** (`beforeToolCall` / `afterToolResult` / `beforeFinish`, jak w przykładzie
+  `03_03_language`): guard przed wysłaniem, doklejanie kontekstu do wyniku, strażnik niepozwalający
+  zakończyć pracy przed dotarciem do slotu. Po pierwszym biegu doszedł trzeci wyjątek w `beforeFinish`:
+  w przegranej pozycji hook **autoryzuje `reset`** zamiast żądać ruchu — wcześniej agent trzy razy
+  z rzędu pytał „mogę zresetować?", bo prompt każe traktować reset jako ostateczność.
+- **Sprzeczny sygnał w feedbacku kosztuje trzykrotność kontekstu**: pierwsza wersja raportu pokazywała
+  trasę do celu także przy komendach odrzuconych („the floor is sealed RIGHT NOW; goal reachable in 5").
+  Agent zrobił się nadmiernie ostrożny — **13 komend i 54K tokenów zamiast 8 i 23K**. Po rozdzieleniu
+  (trasa tylko przy komendach, które przejdą) wrócił do 8.
+- **47 przypadków testowych offline** (`--tests`), bez sieci i klucza. Wśród nich **prawdziwa plansza
+  z przegranego biegu**: trzy kolejne stany przepisane z logu potwierdzają, że `BoardProjection`
+  przewiduje reaktor **co do kratki**, że dokładnie ten ruch, który zgubił robota, jest teraz odrzucany,
+  że pozycja, w której bieg utknął, faktycznie nie ma wyjścia, i że z pozycji startowej istniała trasa
+  w 10 komendach.
+- `SimulatedReactorApi` odpowiada w tym samym kształcie JSON co podgląd, więc parser, guard i pętla
+  agenta działają na nim bez zmian — `--run --offline` to pełna próba generalna bez `/verify` i bez
+  ryzyka. Deterministyczny `RehearsalPilot` (`--simulate`) przechodzi planszę na sześciu układach, co
+  dowodzi, że guard zostawia drogę i nie zakleszcza robota.
+- **Rezultat (zaliczony)**: drugi bieg, **9 komend** — `start`, 3× `right`, 2× `wait`, 3× `right`.
+  Stan reaktora po stronie Huba **wygasa** po kilkunastu minutach, więc zablokowana plansza z pierwszego
+  biegu zniknęła sama i reset nie był potrzebny.
+- Tryby: `--tests`, `--simulate [--seed N]` (offline, bez LLM), `--board [--offline]` (odczyt, **nie
+  przesuwa reaktora**), `--command <cmd>…` (ręcznie, przez ten sam guard), `--run --offline` (agent
+  przeciw symulatorowi), `--run` (prawdziwy reaktor). Transkrypt w `reactor-cache/run-<data>/`,
+  żądania w `reactor-log.jsonl` z kluczem zredagowanym.
 
 ## Zasady pracy w tym repo
 
