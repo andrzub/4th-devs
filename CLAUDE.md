@@ -58,6 +58,7 @@ Konwencje w projektach `*_zadanie`:
 | S03E01 "evaluation" | ✅ zaliczone | Anomalie w 9999 odczytach czujników. Trzy z czterech definicji anomalii rozstrzyga kod (46 plików z błędnymi danymi), model odpowiada tylko na pytanie o tonację notatki operatora. Deduplikacja dwupoziomowa: 9999 → 2032 unikalne notatki → **325 unikalnych klauzul**; odpowiedź modelu to **same numery wyjątków**. Pierwsze zadanie z warstwą **observability i evals**: bramka jakości przed zbudowaniem odpowiedzi. Model: `gpt-4.1-mini` |
 | S03E02 "firmware" | ✅ zaliczone | Uruchomienie sterownika ECCS na maszynie wirtualnej dostępnej wyłącznie przez API powłoki. Maszyna to **dyspozytor 13 komend** — bez potoków i **bez czasownika uruchamiającego program**: binarkę odpala się, podając jej ścieżkę jako całą komendę. Naruszenie czarnej listy (`/etc`, `/root`, `/proc`, wpisy z `.gitignore`) **odbudowuje maszynę**, więc lista jest egzekwowana w kodzie przed wysłaniem komendy (36 przypadków offline). Flaga za pierwszą wysyłką, zero banów. **Pętla agenta nieuruchomiona** — zadanie zrobione ścieżką ręczną przez ten sam guard |
 | S03E03 "reactor" | ✅ zaliczone | Robot z modułem chłodzenia przez planszę 7×5 z bloczkami jeżdżącymi góra/dół. **Bloki ruszają się tylko na komendę**, a stan planszy da się czytać **za darmo** osobnym endpointem podglądu, więc patrzenie nic nie kosztuje, kosztuje dopiero ruch. Pierwszy bieg zgubił robota w **ruchomej ścianie** trzech zsynchronizowanych kolumn; poprawka to `RouteFinder` — graf stanów `(kolumna, tick mod 6)` rozstrzygany w całości, guard odrzuca ślepe zaułki. Flaga w drugim biegu, 9 komend |
+| S03E04 "negotiations" | ✅ zaliczone | **Odwrócenie ról**: agenta ma centrala, ja dostarczam mu 2 narzędzia HTTP z parametrem w języku naturalnym. Dopasowanie opisu do przedmiotu liczy **kod** (IDF + dokładne dopasowanie tokenów z cyfrą), bo cisza narzędzia przerywa misję agenta. Pułapka napięciowa: komplet istnieje tylko w 48 V → **Domatowo i Skolwin**. Drugie nieudokumentowane ograniczenie (`-875`): **300 znaków na opis narzędzia**. Agent zapytał 3 razy, użył tylko pierwszego narzędzia |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -619,6 +620,55 @@ Konwencje w projektach `*_zadanie`:
   przesuwa reaktora**), `--command <cmd>…` (ręcznie, przez ten sam guard), `--run --offline` (agent
   przeciw symulatorowi), `--run` (prawdziwy reaktor). Transkrypt w `reactor-cache/run-<data>/`,
   żądania w `reactor-log.jsonl` z kluczem zredagowanym.
+
+## Zadanie S03E04 — "negotiations" (szczegóły)
+
+- Zadanie **odwraca role**: agenta ma centrala, a ja dostarczam mu narzędzia. Automat wysyła POST
+  `{"params": "..."}` w **języku naturalnym** na mój publiczny adres i oczekuje `{"output": "..."}`.
+  Ograniczenia: maksymalnie **2 narzędzia**, odpowiedź **4–500 bajtów**, **10 kroków**, 3 przedmioty,
+  a **brak odpowiedzi przerywa jego pracę**. Zgłoszenie to lista URL-i z opisami (POST `/verify`,
+  task `negotiations`), weryfikacja **asynchroniczna** przez `answer: {action: "check"}`.
+- Dane: `cities.csv` (50 miast — 48 metropolii plus **Domatowo** i **Skolwin**, dwie wsie wciśnięte
+  między nie), `items.csv` (2137 przedmiotów), `connections.csv` (5349 par, **1–4 miasta** na przedmiot).
+  Katalog jest w 99,7 % szumem; sygnał to **ostatnie 6 pozycji**: turbina / inwerter / akumulator
+  w wersjach 48 V i 24-12 V.
+- **Pułapka jest napięciowa**: komplet ma wspólne miasta tylko w spójnym zestawie 48 V → **Domatowo
+  i Skolwin** (te same wsie, które odstają w `cities.csv`). Każdy mix napięć daje pustkę, a akumulator
+  kwasowy 12 V nie jest oferowany przez **żadne** miasto.
+- Dwa narzędzia: `/api/offers` (miasta dla jednego przedmiotu, ze wszystkimi pasującymi wariantami)
+  i `/api/cities-with-all` (miasta mające całą listę naraz). Dopasowanie NL→przedmiot robi **kod**,
+  nie model: cisza kończy misję agenta, więc endpoint ma odpowiadać zawsze, szybko i tak samo.
+- Rdzeń dopasowania (`Catalog/`): wspólna normalizacja obu stron (diakrytyki, `48 V`/`48V`/`48 woltów`
+  → `48v`), scoring ważony **IDF** (`wiatrowa` 2 razy na 2137 nazw, `dioda` 351), **token z cyfrą musi
+  zgadzać się dokładnie** (1N4001 ≠ 1N4007, 48V ≠ 480V), sprzeczny pomiar to kara ×0,35. Splitter tnie
+  zdanie po `,` `;` `oraz` `i`, a fragment niosący sam parametr dokleja się do poprzedniej pozycji.
+- **Narzędzie nie steruje agenta na 48 V** — lookup pokazuje warianty, a puste przecięcie wraca ze
+  wskazówką „sprawdź zgodność parametrów". Pozycja wieloznaczna jest raportowana jako
+  `turbina wiatrowa (2 warianty)`, bo miasta pochodzą z **sumy** wariantów.
+- Gwarancje w kodzie: każda ścieżka HTTP kończy się **200 z polem `output`** (zepsuty JSON, brak pola,
+  wyjątek), `params` czytane tolerancyjnie; budżet liczony **„na drucie"** (`\n` i `"` jako 2 znaki, bo
+  nie wiadomo, którą długość mierzy centrala) z `UnsafeRelaxedJsonEscaping`; klucz i flaga redagowane
+  w `negotiations-log.jsonl`. **49 testów offline**, bez sieci i klucza.
+- **Drugie nieudokumentowane ograniczenie**: `description` ma limit **300 znaków**. Pierwsze zgłoszenie
+  (opisy ~720 i ~640 znaków) dostało HTTP 400, kod **-875** — *„Field description can contain a maximum
+  of 300 characters in tool #1"* — i nic się nie zarejestrowało, więc `--check` uparcie zwracał `-500`
+  „No results yet". Limit sprawdza teraz `ToolCatalog.Validate` **przed wysłaniem**. Skrócenie do ~290
+  znaków niczego nie kosztowało: zostały format `params`, przykład, odesłanie do drugiego narzędzia
+  i ostrzeżenie o napięciach.
+- **Przebieg (zaliczony)**: agent zapukał **sekundę po zgłoszeniu** i zadał **trzy pytania, wszystkie do
+  narzędzia pierwszego** — „turbina wiatrowa mająca 48V i moc 400W", „akumulator pod 48V dowolna
+  pojemność", „inwerter który pasuje pod 48V". **Narzędzia drugiego nie użył ani razu** (przecięcie zrobił
+  sam, 3 kroki z 10), **spójne napięcie wybrał sam**, a pytał pełnymi zdaniami z odmianą i diakrytykami —
+  dokładnie tym kształtem, pod który pisana była normalizacja. Zero nietrafionych zapytań; centrala
+  odpowiedziała `cities: ["Domatowo", "Skolwin"]` i flagą w pierwszym `--check` po ~70 s.
+  **Wniosek: opis narzędzia jest sugestią, nie sterowaniem** — agent zignorował odesłanie do drugiego
+  narzędzia, bo własna ścieżka też mieściła się w budżecie kroków.
+- Tryby: `--tests`, `--query "<opis>"` / `--common "<lista>"` (lokalny podgląd odpowiedzi z licznikiem
+  bajtów), `--serve [--port 3000]`, `--submission --base-url <adres>` (podgląd zgłoszenia, klucz
+  zamaskowany, bez wysyłki), `--submit --base-url <adres>`, `--check`.
+- Drobiazgi operacyjne: pinggy wymaga jawnego `free@` i **niepustego hasła** (puste Enter = `Connection
+  closed`); uruchomiony `--serve` blokuje `.exe` w `bin\Debug`, więc przebudowa w trakcie sesji idzie
+  przez konfigurację `Release` (`dotnet run -c Release --no-build -- --submit ...`).
 
 ## Zasady pracy w tym repo
 
