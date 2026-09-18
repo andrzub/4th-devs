@@ -59,6 +59,7 @@ Konwencje w projektach `*_zadanie`:
 | S03E02 "firmware" | ✅ zaliczone | Uruchomienie sterownika ECCS na maszynie wirtualnej dostępnej wyłącznie przez API powłoki. Maszyna to **dyspozytor 13 komend** — bez potoków i **bez czasownika uruchamiającego program**: binarkę odpala się, podając jej ścieżkę jako całą komendę. Naruszenie czarnej listy (`/etc`, `/root`, `/proc`, wpisy z `.gitignore`) **odbudowuje maszynę**, więc lista jest egzekwowana w kodzie przed wysłaniem komendy (36 przypadków offline). Flaga za pierwszą wysyłką, zero banów. **Pętla agenta nieuruchomiona** — zadanie zrobione ścieżką ręczną przez ten sam guard |
 | S03E03 "reactor" | ✅ zaliczone | Robot z modułem chłodzenia przez planszę 7×5 z bloczkami jeżdżącymi góra/dół. **Bloki ruszają się tylko na komendę**, a stan planszy da się czytać **za darmo** osobnym endpointem podglądu, więc patrzenie nic nie kosztuje, kosztuje dopiero ruch. Pierwszy bieg zgubił robota w **ruchomej ścianie** trzech zsynchronizowanych kolumn; poprawka to `RouteFinder` — graf stanów `(kolumna, tick mod 6)` rozstrzygany w całości, guard odrzuca ślepe zaułki. Flaga w drugim biegu, 9 komend |
 | S03E04 "negotiations" | ✅ zaliczone | **Odwrócenie ról**: agenta ma centrala, ja dostarczam mu 2 narzędzia HTTP z parametrem w języku naturalnym. Dopasowanie opisu do przedmiotu liczy **kod** (IDF + dokładne dopasowanie tokenów z cyfrą), bo cisza narzędzia przerywa misję agenta. Pułapka napięciowa: komplet istnieje tylko w 48 V → **Domatowo i Skolwin**. Drugie nieudokumentowane ograniczenie (`-875`): **300 znaków na opis narzędzia**. Agent zapytał 3 razy, użył tylko pierwszego narzędzia |
+| S03E05 "savethem" | ✅ zaliczone | Trasa posłańca do Skolwina po planszy 10×10, gdzie **narzędzia odkrywa się w runtime** przez wyszukiwarkę narzędzi. Rzeka jest nie do objechania — jedyne suche pola za nią to ślepe zaułki, więc wodę przechodzi się pieszo albo koniem: `rocket` 8 ruchów → `dismount` → 3 pieszo. Nieudokumentowane: **80 znaków na `query`** narzędzia. Pierwszy bieg agenta poległ (33 iteracje, zero danych), drugi po pięciu poprawkach: **12 iteracji, 15 żądań** |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -669,6 +670,56 @@ Konwencje w projektach `*_zadanie`:
 - Drobiazgi operacyjne: pinggy wymaga jawnego `free@` i **niepustego hasła** (puste Enter = `Connection
   closed`); uruchomiony `--serve` blokuje `.exe` w `bin\Debug`, więc przebudowa w trakcie sesji idzie
   przez konfigurację `Release` (`dotnet run -c Release --no-build -- --submit ...`).
+
+## Zadanie S03E05 — "savethem" (szczegóły)
+
+- Zadanie: wytyczyć trasę posłańca z bazy do Skolwina po planszy **10×10** i wysłać ją jako
+  `answer: ["<pojazd>", "right", "up", ...]` (POST `/verify`, task `savethem`). Budżet: **10 paliwa
+  i 10 jedzenia**, zużywane wyłącznie za ruch. Podgląd: `savethem_preview.html`.
+- **Narzędzi nie ma w kodzie ani w prompcie** — znany jest tylko `/api/toolsearch`, który dopasowuje
+  po słowach kluczowych i zwraca **3 najlepsze** trafienia. Rejestr ma trzy pozycje: `maps` (przyjmuje
+  **nazwę miasta**, `-716 "I don't have maps for such a city"`), `wehicles` (**nazwę pojazdu**,
+  `-616` wypisuje dozwolone), `books` (pełnotekstowe archiwum notatek).
+- **Pułapka terenowa**: rzeka w kolumnach 7–8 dzieli planszę, a jedyne dwa suche pola po jej drugiej
+  stronie (`1,8` i `8,7`) to **ślepe zaułki**. Wodę trzeba przejść pieszo albo koniem. Rakieta sama
+  nie doleci (11 ruchów × 1.0 > 10 paliwa), koń sam nie dojdzie (11 × 1.6 = 17.6 jedzenia), samochód
+  tonie. Zostaje **`rocket` 8 ruchów → `dismount` → 3 pieszo**: 11 ruchów (= dystans Manhattan),
+  paliwo 8.2, jedzenie 8.3. Drzewo `T` dokłada **+0.2 paliwa** tylko trybom z napędem.
+- **Zapasów 10/10 nie ma w archiwum** — `books` opisuje tempo spalania i brak stacji paliw, ale nie
+  stan początkowy. To dana z centrali, więc siedzi w briefingu agenta, a nie wśród rzeczy do odkrycia.
+- Rozwiązanie: `03_05_zadanie` — agent z pięcioma narzędziami: `search_tools`, `ask_tool` (odmawia
+  nazwy, która nie wróciła z wyszukiwarki), `register_world` (agent **zapisuje reguły**, kod sprawdza
+  kształt, nigdy prawdziwość), `plan_route`, `submit_route`. Warstwa `Llm/` i `AgentLoop` z S03E03.
+- **Podział pracy**: model szuka i interpretuje notatki, kod liczy. `RoutePlanner` nie zna pojęcia
+  „najkrótsza trasa" — dwa zasoby drenują się w różnym tempie zależnie od trybu, więc trzyma wszystkie
+  niezdominowane etykiety `(paliwo, jedzenie, ruchy)` na pole i dopiero na końcu przykłada budżet.
+  `RouteSimulator` odgrywa każdą trasę przed wysyłką (odrzucenie kosztuje turę, nie próbę).
+- **Nieudokumentowane ograniczenia**: `query` narzędzia ma limit **80 znaków** (`-617`, wyszukiwarka
+  limitu nie ma — zmierzone binarnie), rate limit ~30 żądań pod rząd i minuta ciszy (`429`, `-9999`),
+  a podgląd (`savethem_backend.php`, POST `key=`) **istnieje dopiero po pierwszej wysyłce** (`-980`),
+  więc jest post-mortem z timeline'em, nie darmowym odczytem przed startem jak w S03E03.
+- **Pierwszy bieg agenta poległ** (33 iteracje, 34 żądania, zero danych) i każdy powód dał poprawkę:
+  nie znalazł `books`, bo nie użył słowa z rodziny *notes* → **rozpoznanie startowe w kodzie**
+  (rzeczowniki briefingu odpytuje kod, jak `BootstrapAsync` w S03E02); siedem razy dostał `-716`
+  i wysyłał opisy zamiast nazwy miasta, mając **Skolwin** w briefingu → licznik odrzuceń w wyniku
+  narzędzia i akapit „narzędzie odpowiada na wartość, nie na prośbę"; zarejestrował atrapę świata
+  (`map: ["S G"]`, budżety 0) → walidator wymaga **sklasyfikowania każdego znaku mapy** i dodatnich
+  zapasów. Do tego pamięć powtórzonych pytań i `Agent.MinSecondsBetweenRequests: 5` (429 od OpenAI).
+- **Drugi bieg (zaliczony): 12 iteracji, 15 żądań do huba.** Ładnie widać pętlę sprzężenia: `register_world`
+  odrzuciło nieznane `R` → agent poszedł po legendę do `books`; `plan_route` powiedziało „żaden tryb
+  nie dojdzie", bo wszystkim wpisał `can_enter_water: false` → poszedł po regułę wody i poprawił
+  rejestrację. **Reguła, której nie odnalazł, wyszła jako brak trasy, a nie jako ciche założenie.**
+  W iteracji 8 ogłosił, że misja jest niewykonalna — zawrócił go hook `BeforeFinish`.
+- **Czego agent nie znalazł**: notatki `trees-and-burn`, więc zarejestrował `tree_extra_fuel: 0`
+  i poprowadził trasę przez drzewo `(5,3)`, licząc paliwo 8.0 zamiast 8.2. Margines uratował bieg —
+  przy ciaśniejszym budżecie to samo przeoczenie byłoby porażką.
+- Tryby: `--tests` (73 przypadki offline, w tym kontrola krzyżowa planera z symulatorem), `--plan`
+  i `--check "<trasa>"` (offline, z pliku świata), `--bootstrap`, `--tools "<query>"`,
+  `--ask <tool|/path> "<query>"`, `--preview`, `--run` (bez wysyłki), `--run --submit`,
+  `--submit-route <pojazd> <ruch>...`. Transkrypt w `savethem-cache/run-<data>/` (tam też `world.json`,
+  który agent zarejestrował), żądania w `savethem-log.jsonl` z kluczem zredagowanym.
+- Easter egg pominięty świadomie: podgląd zdradza `beaver_spot` `{row:2, col:7}` i osobną flagę za
+  znalezienie bobrów (notatka `beavers-north`) — misja poboczna, nie liczy się do zaliczenia.
 
 ## Zasady pracy w tym repo
 
