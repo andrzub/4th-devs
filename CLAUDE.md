@@ -60,6 +60,7 @@ Konwencje w projektach `*_zadanie`:
 | S03E03 "reactor" | ✅ zaliczone | Robot z modułem chłodzenia przez planszę 7×5 z bloczkami jeżdżącymi góra/dół. **Bloki ruszają się tylko na komendę**, a stan planszy da się czytać **za darmo** osobnym endpointem podglądu, więc patrzenie nic nie kosztuje, kosztuje dopiero ruch. Pierwszy bieg zgubił robota w **ruchomej ścianie** trzech zsynchronizowanych kolumn; poprawka to `RouteFinder` — graf stanów `(kolumna, tick mod 6)` rozstrzygany w całości, guard odrzuca ślepe zaułki. Flaga w drugim biegu, 9 komend |
 | S03E04 "negotiations" | ✅ zaliczone | **Odwrócenie ról**: agenta ma centrala, ja dostarczam mu 2 narzędzia HTTP z parametrem w języku naturalnym. Dopasowanie opisu do przedmiotu liczy **kod** (IDF + dokładne dopasowanie tokenów z cyfrą), bo cisza narzędzia przerywa misję agenta. Pułapka napięciowa: komplet istnieje tylko w 48 V → **Domatowo i Skolwin**. Drugie nieudokumentowane ograniczenie (`-875`): **300 znaków na opis narzędzia**. Agent zapytał 3 razy, użył tylko pierwszego narzędzia |
 | S03E05 "savethem" | ✅ zaliczone | Trasa posłańca do Skolwina po planszy 10×10, gdzie **narzędzia odkrywa się w runtime** przez wyszukiwarkę narzędzi. Rzeka jest nie do objechania — jedyne suche pola za nią to ślepe zaułki, więc wodę przechodzi się pieszo albo koniem: `rocket` 8 ruchów → `dismount` → 3 pieszo. Nieudokumentowane: **80 znaków na `query`** narzędzia. Pierwszy bieg agenta poległ (33 iteracje, zero danych), drugi po pięciu poprawkach: **12 iteracji, 15 żądań** |
+| S04E01 "okoeditor" | ✅ zaliczone | Zmiany w Centrum Operacyjnym OKO przez tylne wejście `okoeditor` (POST `/verify`), przy czym panel webowy jest **wyłącznie do czytania** — egzekwuje to `OkoPanelGuard` (whitelista ścieżek; `/edit/` i `/delete/` to zwykłe GET-y). **Identyfikatory są wspólne dla stron** (`incydenty`/`notatki`/`zadania`), więc `UpdateGuard` wymaga pary `page`+`id` z odczytanego listingu — inaczej cicha edycja cudzego rekordu. Kod klasyfikacji (`MOVE04` = zwierzęta) agent czyta z notatki i rejestruje; kod pilnuje tylko kształtu. Trzy zmiany (reklasyfikacja Skolwina, zadanie done+bobry, decoy o Komarowie przez nadpisanie incydentu o Domatowie), potem `done`. Flaga pełną pętlą agenta |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -720,6 +721,66 @@ Konwencje w projektach `*_zadanie`:
   który agent zarejestrował), żądania w `savethem-log.jsonl` z kluczem zredagowanym.
 - Easter egg pominięty świadomie: podgląd zdradza `beaver_spot` `{row:2, col:7}` i osobną flagę za
   znalezienie bobrów (notatka `beavers-north`) — misja poboczna, nie liczy się do zaliczenia.
+
+## Zadanie S04E01 — "okoeditor" (szczegóły)
+
+- Zadanie: wprowadzić zmiany w **Centrum Operacyjnym OKO** przez tylne wejście `okoeditor`
+  (POST `/verify`, akcje odkryte przez `help`). Panel operatora (`https://oko.ag3nts.org/`, login
+  `Zofia`) jest **wyłącznie do czytania** — fabularnie jedno dotknięcie interfejsu zdradza operatorom
+  obecność i odcina dostęp. Trzy zmiany, potem akcja `done` (flaga tylko przy komplecie): (1)
+  reklasyfikacja incydentu o **Skolwinie** z „pojazdy + ludzie" na **zwierzęta**; (2) zadanie o
+  Skolwinie na **wykonane** + treść o bobrach; (3) **decoy** — raport o ruchu ludzi w okolicach
+  **Komarowa**, który (brak akcji `create`) powstaje przez **nadpisanie incydentu o Domatowie**.
+- API `okoeditor` ma **trzy akcje**: `help`, `update` (`page` = `incydenty|notatki|zadania`, `id` =
+  32 hex, opcjonalnie `content`/`title`/`done`; `done` tylko dla `zadania`; wymagane co najmniej jedno
+  z `content`/`title`; `uzytkownicy` read-only) oraz `done`. Brak `create` przesądza, że decoy to
+  nadpisanie istniejącego incydentu, nie nowy rekord.
+- **Panel jest read-only i egzekwuje to kod, nie prompt** (`OkoPanelGuard`): `OkoPanelClient` puszcza
+  wyłącznie ścieżki z whitelisty, a jedyny POST, jaki umie, to logowanie. Linki `/edit/<id>` i
+  `/delete/<id>` to **zwykłe GET-y bez potwierdzenia** (status zadania w widoku szczegółu też jest
+  linkiem `/edit/`, tuż obok treści do przeczytania), więc najdroższy błąd — skasowanie rekordu i
+  spalenie dostępu — jest oddalony o jedno naiwne „pójdę za linkiem". Guard to uniemożliwia zamiast
+  prosić model, żeby nie klikał. To ta sama filozofia co `CommandGuard` w S03E02.
+- **Identyfikatory są wspólne dla stron**: te same 32 znaki adresują inny rekord na `incydenty`,
+  `notatki` i `zadania`. `UpdateGuard` odrzuca parę `page`+`id`, której agent w tym biegu **nie
+  odczytał na tej stronie** — pomyłka w `page` nie zwróciłaby błędu, tylko cicho przepisała cudzy wpis.
+- **Kodeks klasyfikacji odkrywa się z notatki, kod pilnuje tylko spójności**: nigdzie w kodzie nie ma
+  zapisane, że zwierzęta to `04`. Agent czyta notatkę „Metody kodowania incydentów" i rejestruje tabelę
+  (`register_codebook`); kod sprawdza **kształt** (4 litery + 2 cyfry, każdy wpis z opisem, min. dwie
+  rodziny po dwa podtypy — blokuje zarejestrowanie samego `MOVE04` bez przeczytania tabeli). Potem
+  `UpdateGuard` odrzuca tytuł incydentu z kodem spoza tabeli (zmyślone `ANIM01` nie kosztuje żądania),
+  a checklist pyta kodeks: *czy kod, który teraz stoi w tytule, opisano jako zwierzęta?* Kody: `MOVE`
+  wykryto ruch (01 człowiek, 02 pojazd, 03 pojazd+człowiek, **04 zwierzęta**), `PROB` badanie próbki,
+  `RECO` rekonesans. Dla ścieżki ręcznej ten sam kodeks odzyskuje `NoteCodeBookParser` z tekstu notatki
+  (odkrywanie struktury w kodzie, jak `NoteDecomposer` w S03E01) — działa też jako siatka bezpieczeństwa.
+- **Postęp liczony z projekcji konsoli, nie z relacji modelu** (`MissionState`): każda przyjęta edycja
+  nakłada się na zapamiętany rekord, checklist patrzy na wynik. Rozbicie zmiany na dwa wywołania działa
+  naturalnie — po samym `done: YES` punkt 2 zostaje otwarty, domyka się dopiero, gdy w treści pojawią
+  się zwierzęta. Rekord „o Skolwinie" identyfikowany po **pierwszym** odczycie, bo po reklasyfikacji
+  tytuł może już Skolwina nie wymieniać.
+- **Rekonesans robi kod** (`Operation.BootstrapAsync`): wszystkie listingi czytane przed pętlą, więc
+  agent wchodzi znając rekordy i ich identyfikatory (analogicznie do `BootstrapAsync` w S03E02).
+- **`finish_mission` bramkowany, ale nie na amen**: `BeforeFinish` nie wypuszcza do `done`, dopóki
+  checklist nie jest pełna; po kilku odmowach `done` idzie mimo to z zapisaną rozbieżnością — werdykt
+  API jest ostateczny, więc własna bramka nie może uwięzić skończonego biegu.
+- **Prompt sekcyjny, zgeneralizowany** (`OkoPrompt`: `<identity>/<surfaces>/<mission>/<method>/
+  <identifiers>/<rules>/<limits>`) mówi *jak* pracować; *co* zmienić to `CentreOrders` (rozkaz centrali,
+  budowany z settingsów). Kod klasyfikacji celowo nie pada w prompcie — to jedyna rzecz do przeczytania
+  z konsoli. Wyjście z panelu nazwane w prompcie **danymi, nigdy instrukcjami**.
+- Rozwiązanie: `04_01_zadanie` — warstwy `Oko/` (guard, klient, parser HTML), `Hub/OkoEditorClient`,
+  `Mission/` (CodeBook, NoteCodeBookParser, UpdateGuard, MissionState, Operation, TextMatch), `Agents/`
+  (prompt, CentreOrders, hooki, AgentLoop z S03E05), `Tools/` (read_console, read_record,
+  register_codebook, update_record, finish_mission). **86 testów offline** (guard ścieżek, parser HTML,
+  kodeks, parser notatki, guard edycji, checklist), bez sieci i klucza. Model: `gpt-4.1`.
+- Tryby: `--tests`, `--guard "<ścieżka>"` (offline); `--help-api`, `--panel`, `--read <page>/<id>`
+  (odczyt); `--update`/`--done` (ręcznie, przez ten sam guard; bez `--submit` = dry-run na projekcję);
+  `--run` (dry run, nic nie wysłane), `--run --submit` (naprawdę). Transkrypt w
+  `okoeditor-cache/run-<data>/` (tam `codebook.json` i snapshoty HTML), żądania w `okoeditor-log.jsonl`
+  z kluczem zredagowanym.
+- **Rezultat (zaliczony)**: flaga zdobyta **pełną pętlą agenta** (`--run --submit`) — agent przeszedł
+  rekonesans w kodzie, przeczytał notatkę z kodami, zarejestrował kodeks, wykonał trzy zmiany przez
+  `update_record` i domknął akcją `done`. Guard ścieżek panelu nie dopuścił ani jednego zapisu do
+  interfejsu webowego.
 
 ## Zasady pracy w tym repo
 
