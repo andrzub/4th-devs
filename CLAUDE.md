@@ -61,6 +61,7 @@ Konwencje w projektach `*_zadanie`:
 | S03E04 "negotiations" | ✅ zaliczone | **Odwrócenie ról**: agenta ma centrala, ja dostarczam mu 2 narzędzia HTTP z parametrem w języku naturalnym. Dopasowanie opisu do przedmiotu liczy **kod** (IDF + dokładne dopasowanie tokenów z cyfrą), bo cisza narzędzia przerywa misję agenta. Pułapka napięciowa: komplet istnieje tylko w 48 V → **Domatowo i Skolwin**. Drugie nieudokumentowane ograniczenie (`-875`): **300 znaków na opis narzędzia**. Agent zapytał 3 razy, użył tylko pierwszego narzędzia |
 | S03E05 "savethem" | ✅ zaliczone | Trasa posłańca do Skolwina po planszy 10×10, gdzie **narzędzia odkrywa się w runtime** przez wyszukiwarkę narzędzi. Rzeka jest nie do objechania — jedyne suche pola za nią to ślepe zaułki, więc wodę przechodzi się pieszo albo koniem: `rocket` 8 ruchów → `dismount` → 3 pieszo. Nieudokumentowane: **80 znaków na `query`** narzędzia. Pierwszy bieg agenta poległ (33 iteracje, zero danych), drugi po pięciu poprawkach: **12 iteracji, 15 żądań** |
 | S04E01 "okoeditor" | ✅ zaliczone | Zmiany w Centrum Operacyjnym OKO przez tylne wejście `okoeditor` (POST `/verify`), przy czym panel webowy jest **wyłącznie do czytania** — egzekwuje to `OkoPanelGuard` (whitelista ścieżek; `/edit/` i `/delete/` to zwykłe GET-y). **Identyfikatory są wspólne dla stron** (`incydenty`/`notatki`/`zadania`), więc `UpdateGuard` wymaga pary `page`+`id` z odczytanego listingu — inaczej cicha edycja cudzego rekordu. Kod klasyfikacji (`MOVE04` = zwierzęta) agent czyta z notatki i rejestruje; kod pilnuje tylko kształtu. Trzy zmiany (reklasyfikacja Skolwina, zadanie done+bobry, decoy o Komarowie przez nadpisanie incydentu o Domatowie), potem `done`. Flaga pełną pętlą agenta |
+| S04E02 "windpower" | ✅ zaliczone | Harmonogram turbiny w **oknie serwisowym 40 s**. Pierwsze zadanie **bez modelu językowego** — nie ma pytania, na które kod by nie odpowiedział. Cała trudność to kolejność: prognoza zjada **24 s z 40** i podpisy stoją za nią w łańcuchu, bo obejmują `windMs`. Prognoza jest **losowana per sesja** (73 z 84 odczytów), ale wichury są stałe, a podpis nie jest związany z sesją. Zaliczone w **26,28 s**, flaga za pierwszą wysyłką |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -781,6 +782,58 @@ Konwencje w projektach `*_zadanie`:
   rekonesans w kodzie, przeczytał notatkę z kodami, zarejestrował kodeks, wykonał trzy zmiany przez
   `update_record` i domknął akcją `done`. Guard ścieżek panelu nie dopuścił ani jednego zapisu do
   interfejsu webowego.
+
+## Zadanie S04E02 — "windpower" (szczegóły)
+
+- Zadanie: zaprogramować harmonogram turbiny wiatrowej tak, by przetrwała wichury i wyprodukowała
+  brakującą moc elektrowni. Wszystko przez POST `/verify`, `task: "windpower"`, w **oknie serwisowym
+  trwającym 40 sekund** od akcji `start`. Treść zadania mówi wprost: *„liniowe wykonywanie wszystkich
+  akcji nie umożliwi Ci ukończenia zadania"*.
+- **Pierwsze zadanie w kursie bez modelu językowego.** Reguły turbiny są w dokumentacji, prognoza jest
+  tabelą liczb, decyzja to porównanie dwóch wartości — nie ma pytania, na które kod by nie odpowiedział.
+  Pętla agenta kosztowałaby sekundy z czterdziestu i nic by nie wniosła.
+- **Zmierzone koszty kolejki** (`--recon`, okno wydane wyłącznie na pomiar): `powerplantcheck` ~10 s,
+  `turbinecheck` ~12 s, **`weather` ~24 s**, `unlockCodeGenerator` ~2 s, żądanie HTTP ~35 ms.
+  Rozwiązanie nie polega na szybszym wykonywaniu kroków, tylko na ustawieniu ich według tych pomiarów:
+  wszystko zamawiane jest w pierwszej sekundzie, a to, co tanie, dzieje się w cieniu tego, co drogie.
+- **`documentation` jest jedynym raportem dostępnym bez sesji** — reszta zwraca `-905`/`-915`/`-925`
+  (`--probe` potwierdził to bez otwierania okna). Cała krzywa mocy jest więc znana przed zegarem,
+  a `TurbineModel` **czyta ją z dokumentacji**, zamiast mieć ją zaszytą.
+- **Prognoza jest losowana per sesja**: 73 z 84 odczytów zmieniło wartość między dwoma oknami, deficyt
+  przeszedł z `4-5` na `2-3` kW. To pogrzebało pierwotny pomysł podpisywania punktów z cache'u przed
+  otwarciem okna. Ale **wichury są stałe** (te same trzy godziny, 25 / 22 / 28 m/s), a **podpis nie jest
+  związany z sesją** — ten sam punkt dostał w dwóch oknach bit w bit ten sam kod.
+- **Kolejka gubi zamówienia.** Dwa żądania wysłane 3 ms od siebie: jedno dostało `code 14 queued`
+  i nie wróciło nigdy. Stąd zamówienia idą **sekwencyjnie** (żądanie to i tak 35 ms, więc kolejka jest
+  swoim własnym odstępem), prognoza i deficyt są zamawiane **po dwa razy**, a podpis, który nie wróci
+  w 3 s, jest zamawiany ponownie. Osobno: **dwa równoległe pollery dostały ten sam raport dwukrotnie**,
+  więc `getResult` odpytuje **jeden** wątek — skoro serwer potrafi wydać element dwa razy, potrafi go
+  pewnie i zgubić.
+- **`signedParams` przesądza o równoległości podpisów**: odpowiedź generatora echem powtarza
+  podpisane parametry, więc cztery kody zamówione naraz da się przypisać do ich punktów. Bez tego echa
+  odpowiedź jest samym hashem i trzeba by zamawiać pojedynczo. `QueuePump` to jeden poller w tle
+  rozdzielający elementy po `sourceFunction` (raporty) i po `signedParams` (podpisy); reszta biegu
+  **czeka na element po nazwie**, zamiast się o niego ścigać.
+- **Trzy decyzje modelowania**, każda wymuszona przez dane: (1) **interpolacja** między kotwicami tabeli
+  wydajności — wariant kubełkowy nie działa w żadnej zaobserwowanej sesji; (2) **granica 14 m/s liczona
+  jako wichura** — tabela daje tam jeszcze 100%, a reguła bezpieczeństwa mówi „uszkodzenie", więc
+  wątpliwość rozstrzyga się na „zabezpiecz"; (3) kryterium godziny produkcyjnej to **„jest w stanie
+  pokryć deficyt"** (górny wydatek ≥ górny deficyt) — ostrzejsze odrzuciłoby jedyne dwie godziny
+  w tygodniu przy deficycie 2-3 kW, czyli zwróciłoby „brak rozwiązania" tam, gdzie rozwiązanie istnieje.
+- `ScheduleValidator` stoi **przed** jedynym `config` w oknie: odrzuca niezabezpieczoną wichurę,
+  produkcję w wichurze, kąt za słaby na deficyt, godzinę późniejszą niż potrzeba, punkt podpisany na
+  wiatr niepotwierdzony prognozą, punkt bez kodu i godzinę niepełną. `done` nie leci, gdy `config`
+  zostanie odrzucony — walidowałoby pusty harmonogram. **23 testy offline**, w tym odtworzenie obu
+  zaobserwowanych sesji (6,6 m/s przy 4-5 kW i 4,9 m/s przy 2-3 kW).
+- **Rezultat (zaliczony)**: 4 punkty konfiguracji — ochrona `pitch 90` + `idle` na 22.09 18:00 (25 m/s),
+  25.09 18:00 (22 m/s) i 26.09 18:00 (28 m/s), produkcja `pitch 0` + `production` na **22.09 20:00**
+  (4,9 m/s, pierwsza możliwa godzina, 2 h po pierwszej wichurze). `config` przyjął `storedPoints: 4`,
+  `done` zwróciło flagę i `elapsedSeconds: 26.28` przy limicie 40. Zero ponowień, zero pomyłek.
+- Tryby: `--tests`, `--plan` (harmonogram z cache'u, offline), `--help-api`, `--doc`, `--probe`
+  (zamówienia bez okna), `--recon` (okno wydane na pomiar), `--rehearsal` (pełna choreografia z danych
+  sesji, zatrzymana przed `config`/`done`), `--run` (całość). Surowe odpowiedzi w
+  `windpower-cache/run-<data>/`, żądania w `windpower-log.jsonl` z kluczem zredagowanym; oba gitignored,
+  bo zawierają flagę.
 
 ## Zasady pracy w tym repo
 
