@@ -62,6 +62,7 @@ Konwencje w projektach `*_zadanie`:
 | S03E05 "savethem" | ✅ zaliczone | Trasa posłańca do Skolwina po planszy 10×10, gdzie **narzędzia odkrywa się w runtime** przez wyszukiwarkę narzędzi. Rzeka jest nie do objechania — jedyne suche pola za nią to ślepe zaułki, więc wodę przechodzi się pieszo albo koniem: `rocket` 8 ruchów → `dismount` → 3 pieszo. Nieudokumentowane: **80 znaków na `query`** narzędzia. Pierwszy bieg agenta poległ (33 iteracje, zero danych), drugi po pięciu poprawkach: **12 iteracji, 15 żądań** |
 | S04E01 "okoeditor" | ✅ zaliczone | Zmiany w Centrum Operacyjnym OKO przez tylne wejście `okoeditor` (POST `/verify`), przy czym panel webowy jest **wyłącznie do czytania** — egzekwuje to `OkoPanelGuard` (whitelista ścieżek; `/edit/` i `/delete/` to zwykłe GET-y). **Identyfikatory są wspólne dla stron** (`incydenty`/`notatki`/`zadania`), więc `UpdateGuard` wymaga pary `page`+`id` z odczytanego listingu — inaczej cicha edycja cudzego rekordu. Kod klasyfikacji (`MOVE04` = zwierzęta) agent czyta z notatki i rejestruje; kod pilnuje tylko kształtu. Trzy zmiany (reklasyfikacja Skolwina, zadanie done+bobry, decoy o Komarowie przez nadpisanie incydentu o Domatowie), potem `done`. Flaga pełną pętlą agenta |
 | S04E02 "windpower" | ✅ zaliczone | Harmonogram turbiny w **oknie serwisowym 40 s**. Pierwsze zadanie **bez modelu językowego** — nie ma pytania, na które kod by nie odpowiedział. Cała trudność to kolejność: prognoza zjada **24 s z 40** i podpisy stoją za nią w łańcuchu, bo obejmują `windMs`. Prognoza jest **losowana per sesja** (73 z 84 odczytów), ale wichury są stałe, a podpis nie jest związany z sesją. Zaliczone w **26,28 s**, flaga za pierwszą wysyłką |
+| S04E03 "domatowo" | ✅ zaliczone | Misja ratunkowa: partyzant „w jednym z najwyższych bloków" na mapie 11×11, 300 punktów akcji, każda akcja gry przez `/verify`. **Drugie zadanie bez modelu**: wpisy `getLogs` to proza bez podpowiedzi, o trafieniu rozstrzyga flaga serwera. Planer wycenia wyczerpująco 24 porządki przeszukania po **koszcie oczekiwanym** pod budżetem najgorszego przypadku, wykonawca gra jedną akcją na raz przez guard, ledger pamięta załogi i obejrzane pola (hub tego nie oddaje). Trafienie na `G1` jako 12. z 14 pól, **155 z 300 punktów**, zero odrzuceń guarda. Pierwsze zadanie, w którym akcje gry wykonywał Claude, helikopter wezwałem ja |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -835,12 +836,69 @@ Konwencje w projektach `*_zadanie`:
   `windpower-cache/run-<data>/`, żądania w `windpower-log.jsonl` z kluczem zredagowanym; oba gitignored,
   bo zawierają flagę.
 
+## Zadanie S04E03 — "domatowo" (szczegóły)
+
+- Zadanie: odnaleźć partyzanta w ruinach Domatowa i wezwać helikopter na pole, na którym zwiadowca
+  potwierdził człowieka. Mapa **11×11**, do 4 transporterów i 8 zwiadowców, **300 punktów akcji**.
+  Wszystko przez POST `/verify`, `task: "domatowo"`, akcje z `help`: `create`, `move`, `inspect`,
+  `dismount`, `callHelicopter`, `reset` oraz darmowe `getMap`, `searchSymbol`, `getObjects`, `getLogs`,
+  `expenses`, `actionCost`. Ceny: zwiadowca 5, transporter 5 + 5/pasażer, ruch zwiadowcy **7/pole**,
+  ruch transportera 1/pole, inspekcja 1, `dismount` i `callHelicopter` 0.
+- **Drugie zadanie bez modelu językowego** (po S04E02). Wpisy `getLogs` to zróżnicowana proza fabularna
+  („kot uciekający przez wybite okno", „szczur większy niż kot") bez podpowiedzi kierunkowych, a o trafieniu
+  rozstrzyga `human_found`/`human_found_at` z serwera. Model jako interpreter logów nie miałby na co odpowiadać.
+- **Rekonesans bez punktów**: podgląd `domatowo_preview` ma **całą siatkę wpisaną w HTML** po stronie serwera,
+  bez klucza; backend `domatowo_backend.php` (`action=pull`, wymaga nagłówka `Origin`/`Referer` huba) oddaje
+  za darmo punkty, `human_found`, jednostki i kolejkę animacji. Ale **pozycje w `pull` stoją w miejscu, dopóki
+  strona podglądu nie potwierdzi kolejki** (`ack`), więc źródłem prawdy o pozycjach jest `getObjects` (0 pkt).
+- Sygnał „jeden z najwyższych bloków" → symbol `B3` (odczyt operatora, `TargetSymbol` w konfiguracji):
+  14 pól w trzech skupiskach `F1–G2`, `A10–C11`, `H10–I11`, każde styka się z ulicą (przystanki `E2`;
+  `B9`/`C9`; `H9`/`I9`). Spawn jednostek na `A6 → D6`, trasy liczy serwer (transporter ulicami, zwiadowca
+  najkrótszą ortogonalną), `inspect` bada **tylko pole, na którym zwiadowca stoi**.
+- **Planer** (`SearchPlanner`): wszystkie porządki skupisk × wszystkie podziały między transportery
+  (24 kandydatów), trasa zwiadowcy po skupisku jako najtańsza permutacja (≤ 6 pól). Kryterium: najniższy
+  **koszt oczekiwany** przy jednostajnym rozkładzie partyzanta, pod warunkiem że najgorszy przypadek plus rezerwa
+  lądowania mieści się w 300. Wygrał wariant: transporter z 2 zwiadowcami `A6 → C9 → H9`, a dopiero gdy pusto,
+  **drugi** transporter z 1 zwiadowcą do `E2` (oczekiwane 77,0 vs 80,3 dla jednego konwoju z trzema, bo trzeci
+  pasażer nie jest opłacany z góry).
+- **Wykonawca** (`Operation` + `Tactician`): jedna akcja na raz, po każdej trzy darmowe odczyty. Preferencje idą
+  za cennikiem: `inspect` tam, gdzie zwiadowca stoi → `dismount` z transportera na przystanku nieobsadzonego
+  skupiska → krok zwiadowcy po swoim skupisku → przejazd załadowanego transportera → dopiero zakup jednostek.
+  Zwiadowca dostaje skupisko tylko, gdy dojście pieszo nie jest droższe niż dowiezienie świeżego. `ActionGuard`
+  przed każdą wysyłką: budżet po projekcji, transporter tylko na osiągalną ulicę, limity 4/8, `dismount` tylko
+  gdy wokół są wolne pola, `callHelicopter` tylko na `human_found_at`, `reset` wyłącznie z `--allow-reset`.
+- **`OperationLedger`** (`domatowo-cache/ledger.json`) pamięta to, czego hub nie oddaje na żądanie: ile zwiadowców
+  siedzi w transporterze (`crew[]` z `create`, `dismounted[]` z `dismount`, dla jednego transportera wnioskowanie
+  z liczników) i które pola obejrzano (wpisy `getLogs` **wygasają po kilku minutach**, w obrębie biegu powtarzają
+  się przy każdym odczycie).
+- **Odkryte w biegu, nieobecne w `help`**: `dismount` sadza zwiadowcę **na polu na północ od pojazdu**, także
+  gdy to budynek (`H8` = kościół) — reguła to kierunek, nie teren, więc przy blokach na południe/wschód od ulic
+  zwiadowca zawsze dochodził pieszo (rezerwa 2 kroki na wizytę); **sloty spawnu zużywają się** (drugi
+  transporter na `B6`, choć `A6` było puste); `path_steps` liczy pole startowe; `getObjects` zwraca `typ`
+  zamiast `type`.
+- **Rezultat (zaliczony)**: 28 akcji płatnych, **155 z 300 punktów**, człowiek na **`G1`** jako 12. z 14 pól
+  („Udało się. Mężczyzna w wieku około 30 lat chował się za workami z cementem."). Zero odrzuceń guarda,
+  zero błędów huba. Pierwszy odcinek ręcznie przez `--action` (nauka reguł), reszta wykonawcą w trzech biegach
+  (`--max-actions 6`, `10`, `18`). **Pierwsze zadanie, w którym akcje gry wykonywał Claude** (wyjątek w zasadach
+  poniżej), `callHelicopter destination=G1` wykonałem ja. Uwaga procesowa: edycja `CLAUDE.md` i wysyłka akcji
+  w tej samej turze została raz zablokowana przez klasyfikator uprawnień jako „self-modification".
+- **54 testy offline** (`--tests`), w tym prawdziwa plansza z połowy odcinka (transporter na `C9`, zwiadowca na
+  `C8`) jako scenariusz wznowienia taktyka. Tryby: `--tests`, `--plan` (offline), `--help-api`, `--get-map`,
+  `--state`, `--action <nazwa> [k=v]` (przez guard), `--next` (wybór bez wysyłki), `--step` (jedna akcja),
+  `--run [--max-actions N]`. Odpowiedzi w `domatowo-cache/`, żądania w `domatowo-log.jsonl` z kluczem
+  zredagowanym; oba gitignored, bo zawierają flagę.
+
 ## Zasady pracy w tym repo
 
 - **Nie uruchamiać wysyłki odpowiedzi do Huba (`/verify`)** — ani bezpośrednio, ani przez uruchomienie
   agenta, który ją wysyła. Zadanie kończy się na gotowym, zbudowanym kodzie + instrukcji uruchomienia.
   Rozwiązanie uruchamiam i odpowiedź wysyłam **ja sam** — chcę prześledzić proces i się uczyć.
   (Pomocnicze wywołania endpointów *danych* Huba, np. `/api/location`, przy debugowaniu są OK.)
+  - **Wyjątek dla zadań, w których każda akcja gry idzie przez `/verify`** (jak `domatowo` w S04E03),
+    ustalony 2026-09-24: Claude może sam wykonywać akcje rekonesansu i planu (`move`, `dismount`,
+    `inspect`, `getLogs`, `getObjects` itp.) — zawsze przez guard w kodzie, z pełnym logiem i relacją
+    z każdej odpowiedzi. **Akcję zamykającą misję i zwracającą flagę** (np. `callHelicopter`) wykonuję
+    ja sam. `reset` (losuje partyzanta od nowa) nigdy bez mojej jawnej zgody.
 - Język komunikacji ze mną: polski. Komentarze w kodzie: angielski (moja globalna zasada).
 - Nie commitować sekretów ani flag. Przed commitem sprawdzić, czy `appsettings.Development.json` nie wpadł do stage.
 - Nie ruszać folderów przykładów z upstreamu — ułatwia to przyszłe merge z oryginalnym repo.
