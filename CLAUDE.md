@@ -64,6 +64,7 @@ Konwencje w projektach `*_zadanie`:
 | S04E02 "windpower" | ✅ zaliczone | Harmonogram turbiny w **oknie serwisowym 40 s**. Pierwsze zadanie **bez modelu językowego** — nie ma pytania, na które kod by nie odpowiedział. Cała trudność to kolejność: prognoza zjada **24 s z 40** i podpisy stoją za nią w łańcuchu, bo obejmują `windMs`. Prognoza jest **losowana per sesja** (73 z 84 odczytów), ale wichury są stałe, a podpis nie jest związany z sesją. Zaliczone w **26,28 s**, flaga za pierwszą wysyłką |
 | S04E03 "domatowo" | ✅ zaliczone | Misja ratunkowa: partyzant „w jednym z najwyższych bloków" na mapie 11×11, 300 punktów akcji, każda akcja gry przez `/verify`. **Drugie zadanie bez modelu**: wpisy `getLogs` to proza bez podpowiedzi, o trafieniu rozstrzyga flaga serwera. Planer wycenia wyczerpująco 24 porządki przeszukania po **koszcie oczekiwanym** pod budżetem najgorszego przypadku, wykonawca gra jedną akcją na raz przez guard, ledger pamięta załogi i obejrzane pola (hub tego nie oddaje). Trafienie na `G1` jako 12. z 14 pól, **155 z 300 punktów**, zero odrzuceń guarda. Pierwsze zadanie, w którym akcje gry wykonywał Claude, helikopter wezwałem ja |
 | S04E04 "filesystem" | ✅ zaliczone | Notatki Natana o handlu wymiennym (4 pliki, 4 KB) uporządkowane w wirtualnym systemie plików Huba: `/miasta` (JSON zapotrzebowania), `/osoby` (imię, nazwisko, link do miasta), `/towary` (linki do sprzedawców). Pierwsze zadanie z **bazą wiedzy jak w lekcji**: mapa treści + szablony w `workspace/`, agent `gpt-4.1` pisze do **lokalnej projekcji**, kod egzekwuje limity API (`^[a-z0-9_]+$`, ≤ 20 znaków, nazwy unikalne globalnie) i spójność z ledgerem. Pierwsza wysyłka odrzucona (`-805`, brak „Rafał Kisiel"): agent zapisał `kisiel_kisiel`, bo guard żądał dwóch słów, a **komunikat odmowy nie odsyłał do dziennika**. Po poprawce komunikatu i heurystyce liczby mnogiej (`-i`/`-y`) drugi bieg dał `rafal_kisiel` i `ziemniak`, flaga za drugą wysyłką |
+| S04E05 "foodwarehouse" | ✅ zaliczone | Osiem zamówień w magazynie Zygfryda (jedno na miasto z `food4cities.json`), każde z kodem celu i twórcą z bazy SQLite oraz podpisem SHA1 z generatora. **Wąskie okno dla modelu**: agent `gpt-4.1` ma tylko odczyt bazy przez guard i rejestrację planu (miasto → kod, twórca), a ilości, podpisy i wykonanie robi kod. Fakty do planu muszą pochodzić z wierszy, które agent naprawdę odczytał. Dwa biegi po **8 wywołań**, zero odmów, twórcy = twórcy zamówień seed. Pułapki: wyniki stronicowane po 30 (Domatowo na 2. stronie), `<`/`>` w zapytaniu = `-620`, 11 użytkowników bez `user_id`, **seedów nie da się usunąć** (`delete` udaje sukces) — na tym stanęły dwie pierwsze wysyłki; trzecia, po czyszczeniu tylko celów z planu, dała flagę. `done` toleruje seedy |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -954,6 +955,54 @@ Konwencje w projektach `*_zadanie`:
   `--help-api`, `--list [ścieżka]`, `--reset`, `--submit <plan.json>` (Hub). Żądania w `filesystem-log.jsonl`
   z kluczem zredagowanym; cache i log gitignored, bo zawierają flagę. Notatki Natana scommitowane
   w `natan-notes/` (publiczne, 4 KB), żeby testy działały offline.
+
+## Zadanie S04E05 — "foodwarehouse" (szczegóły)
+
+- Zadanie: w systemie centralnego magazynu Zygfryda utworzyć **po jednym zamówieniu dla każdego z 8 miast**
+  z `https://hub.ag3nts.org/dane/food4cities.json` (te same miasta co w S04E04, 3–5 towarów, `woda` wszędzie)
+  i uzupełnić je dokładnie tym, czego miasto potrzebuje. Wszystko przez POST `/verify`, `task: "foodwarehouse"`,
+  narzędzie w `answer.tool`: `orders` (`get`/`create`/`append`/`delete`), `signatureGenerator.generate`
+  (`login`, `birthday`, `destination` → SHA1 w polu `hash`), `database` (SQLite tylko do odczytu: `SELECT`,
+  `SHOW TABLES`, `SHOW CREATE TABLE`, `.tables`, `.schema`), `reset`, `done`.
+- **Baza**: 3 tabele — `destinations` (40 miast), `roles` (6), `users` (78). `create` wymaga `creatorID`
+  (= `user_id`), numerycznego `destination` i podpisu, który generator liczy z `login` + `birthday` twórcy
+  + `destination`; zweryfikowane na zamówieniu seed (ten sam SHA1 bit w bit). Na starcie **4 zamówienia seed**
+  do miast spoza misji, wszystkie od użytkowników z rolą 2 „Obsługa transportów" (13 takich, wszyscy aktywni).
+- **Pułapki danych**: wyniki `database` **stronicowane po 30 wierszy** (`count`, `limit`, `totalTableRows` liczy
+  całą tabelę, nie filtr) — Domatowo jest dopiero na 2. stronie; `<` i `>` w zapytaniu dają `-620 "cannot
+  contain HTML tags"` (`!=` działa); tabela `users` **bez klucza głównego**, 11 wierszy z `user_id = NULL`
+  (rola 6 „Vibe Coder", w `name_surname` fragmenty base64, jeden z nagłówkiem gzip — misja poboczna, pominięta);
+  `append` **sumuje** ilość istniejącego towaru, więc ślepy retry podwaja zamówienie; `IN ('opalino', …)`
+  z nazwami z pliku zwraca 0 wierszy, bo w bazie są z wielkiej litery, a `IN` w SQLite rozróżnia wielkość liter.
+- **Seedów nie da się usunąć**: `delete` odpowiada „Order deleted" i zdejmuje licznik (3, 2, 1, 0), ale `orders
+  get` sekundę później pokazuje całą czwórkę. Dwie pierwsze wysyłki stanęły na tym, bo wykonawca żądał pustego
+  magazynu; `done` wywołane wtedy bez naszych zamówień dało `-655` z listą wszystkich 8 miast i ich towarów.
+  Poprawka: czyścić tylko zamówienia do celów z planu, seedy zostawić i nie oceniać. **`done` toleruje seedy.**
+- Rozwiązanie: `04_05_zadanie` — motyw lekcji (narzędzia wewnątrzfirmowe) zrealizowany jako **wąskie okno dla
+  modelu**: agent `gpt-4.1` ma `query_database` (guard: kształty z `help`, bez `;`, komentarzy, słów zapisu
+  i `<`/`>`; identyczne zapytanie z pamięci), `list_orders`, `register_orders` (miasto → `destination_id`,
+  `creator_id`, `login`, `birthday`; **bez ilości**) i `check_plan`. Warstwa `Llm/` i `AgentLoop` z 04_04.
+- **Fakty tylko z obserwacji** (`Observations`): każdy odczytany wiersz jest zapamiętany pod oryginalnymi nazwami
+  kolumn (cząstkowe wiersze scalane po loginie); `register_orders` odrzuca wpis, którego kod celu albo twórca
+  (niepusty `user_id`, `is_active = 1`, login i data zgodne z wierszem) nie ma obserwacji — jak `UpdateGuard`
+  w S04E01. **Rola twórcy to ostrzeżenie, nie reguła** (dokumentacja o niej milczy): `check_plan` nie akceptuje
+  planu z ostrzeżeniem domyślnie, agent musi je przyjąć (`accept_warnings=true`) albo zmienić plan. Hook odrzuca
+  rejestrację, dopóki agent nie obejrzał istniejących zamówień (jedyny przykład zaakceptowanego zamówienia).
+- **Wykonanie deterministyczne** (`--submit plan.json`): plan weryfikowany **na nowo z żywej bazy** (4 odczyty,
+  obserwacje agenta to migawka) → `reset` → usunięcie zamówień do celów z planu → per miasto podpis z generatora,
+  `create` (id w `order.id`), jeden `append` batch → końcowe `orders get` porównane z planem (cel, twórca, podpis)
+  i zapotrzebowaniem (brak/nadmiar/zła ilość). `create` i `append` nie są ponawiane po utracie odpowiedzi —
+  najpierw odczyt stanu. `done` osobno (`--done`). **134 testy offline** na danych syntetycznych.
+- **Przebieg (zaliczony)**: dwa biegi agenta, oba po **8 wywołań** i identyczne: `.schema` → cele po nazwach
+  (0 wierszy) → `list_orders` → pełna lista celów + **2. strona** → użytkownicy 2/5/7/8 → `register_orders`
+  (8 miast w jednym wywołaniu) → `check_plan`, zero odmów. Twórcy = czterej twórcy zamówień seed rotacyjnie
+  (wniosek agenta, nie promptu). Trzecia wysyłka: 31 żądań (4 weryfikacja + `reset` + `get` + 8 × 3 + `get`),
+  `done` zwróciło `code 0` z flagą i listą 8 zamówień z nazwami miast.
+- Tryby: `--tests`, `--demand`, `--validate <plan>`, `--prompt` (offline); `--fetch`; `--help-api`,
+  `--query "<sql>"`, `--orders [id]` (odczyt); `--run` (agent, same odczyty, zero zamówień; `plan.json`,
+  `observations.json`, `validation.txt`, transkrypt w `foodwarehouse-cache/run-<data>/`); `--verify <plan>`,
+  `--submit <plan>`, `--reset`, `--done`. Żądania w `foodwarehouse-log.jsonl` z kluczem zredagowanym; cache
+  i log gitignored, bo zawierają flagę. `data/food4cities.json` scommitowany (publiczny, 677 B).
 
 ## Zasady pracy w tym repo
 
