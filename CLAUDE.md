@@ -63,6 +63,7 @@ Konwencje w projektach `*_zadanie`:
 | S04E01 "okoeditor" | ✅ zaliczone | Zmiany w Centrum Operacyjnym OKO przez tylne wejście `okoeditor` (POST `/verify`), przy czym panel webowy jest **wyłącznie do czytania** — egzekwuje to `OkoPanelGuard` (whitelista ścieżek; `/edit/` i `/delete/` to zwykłe GET-y). **Identyfikatory są wspólne dla stron** (`incydenty`/`notatki`/`zadania`), więc `UpdateGuard` wymaga pary `page`+`id` z odczytanego listingu — inaczej cicha edycja cudzego rekordu. Kod klasyfikacji (`MOVE04` = zwierzęta) agent czyta z notatki i rejestruje; kod pilnuje tylko kształtu. Trzy zmiany (reklasyfikacja Skolwina, zadanie done+bobry, decoy o Komarowie przez nadpisanie incydentu o Domatowie), potem `done`. Flaga pełną pętlą agenta |
 | S04E02 "windpower" | ✅ zaliczone | Harmonogram turbiny w **oknie serwisowym 40 s**. Pierwsze zadanie **bez modelu językowego** — nie ma pytania, na które kod by nie odpowiedział. Cała trudność to kolejność: prognoza zjada **24 s z 40** i podpisy stoją za nią w łańcuchu, bo obejmują `windMs`. Prognoza jest **losowana per sesja** (73 z 84 odczytów), ale wichury są stałe, a podpis nie jest związany z sesją. Zaliczone w **26,28 s**, flaga za pierwszą wysyłką |
 | S04E03 "domatowo" | ✅ zaliczone | Misja ratunkowa: partyzant „w jednym z najwyższych bloków" na mapie 11×11, 300 punktów akcji, każda akcja gry przez `/verify`. **Drugie zadanie bez modelu**: wpisy `getLogs` to proza bez podpowiedzi, o trafieniu rozstrzyga flaga serwera. Planer wycenia wyczerpująco 24 porządki przeszukania po **koszcie oczekiwanym** pod budżetem najgorszego przypadku, wykonawca gra jedną akcją na raz przez guard, ledger pamięta załogi i obejrzane pola (hub tego nie oddaje). Trafienie na `G1` jako 12. z 14 pól, **155 z 300 punktów**, zero odrzuceń guarda. Pierwsze zadanie, w którym akcje gry wykonywał Claude, helikopter wezwałem ja |
+| S04E04 "filesystem" | ✅ zaliczone | Notatki Natana o handlu wymiennym (4 pliki, 4 KB) uporządkowane w wirtualnym systemie plików Huba: `/miasta` (JSON zapotrzebowania), `/osoby` (imię, nazwisko, link do miasta), `/towary` (linki do sprzedawców). Pierwsze zadanie z **bazą wiedzy jak w lekcji**: mapa treści + szablony w `workspace/`, agent `gpt-4.1` pisze do **lokalnej projekcji**, kod egzekwuje limity API (`^[a-z0-9_]+$`, ≤ 20 znaków, nazwy unikalne globalnie) i spójność z ledgerem. Pierwsza wysyłka odrzucona (`-805`, brak „Rafał Kisiel"): agent zapisał `kisiel_kisiel`, bo guard żądał dwóch słów, a **komunikat odmowy nie odsyłał do dziennika**. Po poprawce komunikatu i heurystyce liczby mnogiej (`-i`/`-y`) drugi bieg dał `rafal_kisiel` i `ziemniak`, flaga za drugą wysyłką |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -887,6 +888,72 @@ Konwencje w projektach `*_zadanie`:
   `--state`, `--action <nazwa> [k=v]` (przez guard), `--next` (wybór bez wysyłki), `--step` (jedna akcja),
   `--run [--max-actions N]`. Odpowiedzi w `domatowo-cache/`, żądania w `domatowo-log.jsonl` z kluczem
   zredagowanym; oba gitignored, bo zawierają flagę.
+
+## Zadanie S04E04 — "filesystem" (szczegóły)
+
+- Zadanie: uporządkować notatki Natana (`https://hub.ag3nts.org/dane/natan_notes.zip`: `ogłoszenia.txt`,
+  `rozmowy.txt`, `transakcje.txt`, `README.md`) w wirtualnym systemie plików Huba. Trzy katalogi:
+  `/miasta` (plik na miasto, w środku JSON `{"towar": ilość}` bez jednostek), `/osoby` (imię i nazwisko
+  osoby odpowiedzialnej za handel + link markdown do miasta), `/towary` (plik na towar w **mianowniku
+  liczby pojedynczej**, w środku linki do miast, które go oferują). Bez polskich znaków w nazwach i JSON.
+  Wszystko przez POST `/verify`, `task: "filesystem"`, pojedyncza akcja albo **batch** (tablica akcji).
+- **API z `help`**: `createFile` (nadpisuje; „tylko markdown", **linki muszą wskazywać istniejące pliki**),
+  `createDirectory`, `deleteFile`, `deleteDirectory`, `listFiles` (nie działa w batchu), `reset` (działa
+  w batchu), `done` (tylko osobno). Limity: `allowed_name_pattern: ^[a-z0-9_]+$` (**tylko małe litery**),
+  plik ≤ 20 znaków, katalog ≤ 30, głębokość ≤ 3, **`global_unique_names`** (towar i miasto nie mogą się
+  nazywać tak samo). Podgląd `filesystem_preview.html` czyta `filesystem_backend.php` GET-em na sesji
+  cookie (bez klucza `-990 Invalid request origin`) i po `done` pokazuje flagę jako **plik** w drzewie.
+- **Kształt danych**: 8 miast (Opalino, Domatowo, Brudzewo, Darzlubie, Celbowo, Mechowo, Puck,
+  Karlinkowo), 8 osób, 24 transakcje `sprzedawca -> towar -> kupujący`, 13 towarów. Pułapki językowe:
+  odmiana nazw miast („z Pucka", „w Darzlubiu"), dopełniacz liczby mnogiej w ogłoszeniach („6 mlotkow"),
+  **osoby rozbite między wpisami dziennika** (Brudzewo: „Kisiel" w jednym, „Rafal" w drugim →
+  Rafał Kisiel; Karlinkowo: „Konkel" + „Lena" → Lena Konkel), Domatowem zarządza sam Natan Rams
+  („ja to spinam"). Ledger pisze `ziemniaki` w mnogiej; woda jest tylko potrzebna, mąka tylko sprzedawana.
+  Uwaga dziennika „wode juz sobie jakos wykombinowali" (Darzlubie) zignorowana: liczby wyłącznie z ogłoszeń.
+- Rozwiązanie: `04_04_zadanie`. **Baza wiedzy jak w lekcji**: `workspace/index.md` to mapa treści
+  (katalogi, źródło prawdy per katalog, limity API, kolejność miasta → osoby → towary), `workspace/templates/`
+  to trzy szablony z **wymyślonymi przykładami** (Komarowo, koparka), żeby nie podpowiadały odpowiedzi.
+  Mapa treści trafia do promptu w oryginale, szablony i notatki agent czyta narzędziami. Agent `gpt-4.1`
+  z siedmioma narzędziami na **lokalnej projekcji** (`read_note`, `read_template`, `list_files`,
+  `read_file`, `write_file`, `delete_file`, `check_plan`) — **nigdy nie dotyka Huba**. Warstwa `Llm/`
+  i `AgentLoop` z 04_01.
+- **„Rozejrzyj się, zanim zapiszesz" egzekwuje hook**: `write_file` odrzucony, dopóki nie przeczytano
+  wszystkich notatek i szablonu katalogu, do którego pisze. `BeforeFinish` zawraca agenta z raportem
+  walidatora; cel biegu to werdykt walidatora, nie deklaracja modelu.
+- **Gwarancje w kodzie**: `WriteGuard` na każdy zapis (trzy katalogi, nazwa wg limitów API, treść ASCII,
+  miasto = obiekt JSON z małymi kluczami i dodatnimi całkowitymi, osoba = pełne imię i nazwisko z **dwóch
+  różnych słów** + dokładnie jeden link do istniejącego miasta, towar = linki tylko do istniejących miast).
+  `PlanValidator` na całość: każde miasto ma dokładnie jedną osobę, każda liczba istnieje w ogłoszeniach,
+  każda nazwa miasta i osoby ma rdzeń w notatkach, `/towary` odzwierciedla ledger sprzedawca po sprzedawcy
+  (dopasowanie po dokładnej nazwie albo rdzeniu: `ziemniaki` trafia w `ziemniak`, `maka` nie trafia
+  w `makaron`). Ten sam walidator jest narzędziem `check_plan`, bramką `BeforeFinish` i bramką `--submit`.
+  Wysyłka to trzy żądania z osobnymi werdyktami: `reset` → paczka (katalogi, potem pliki — link musi
+  wskazywać istniejący plik, więc kolejność ma znaczenie) → `done`. Flaga przez regex.
+  **96 testów offline** na syntetycznym świecie trzech miast, więc odpowiedź nie jest zaszyta w kodzie.
+- **Bieg 1 odrzucony przez Hub mimo lokalnej walidacji** (56 wywołań, 44 zapisy, 1 odmowa): paczka
+  32 akcji przeszła w całości, `done` zwrócił `-805` *„Some people are missing in /osoby files"*,
+  `missing: ["Rafał Kisiel"]`. Agent zapisał `/osoby/kisiel` z samym nazwiskiem, guard odrzucił
+  komunikatem o kształcie `firstname_surname`, a agent **powtórzył nazwisko** (`kisiel_kisiel`),
+  zamiast wrócić do dziennika. **Guard sam sprowokował fałszerstwo** — komunikat odmowy jest częścią
+  guarda, a żądanie kształtu bez wskazania źródła zaprasza do zmyślenia. Druga, ukryta luka:
+  `/towary/ziemniaki` w mnogiej przeszło, bo ledger też pisze `ziemniaki`, a walidator uznał dokładną
+  kopię za dopasowanie. Hub zgłasza **jeden błąd naraz** (jak `-948` w S02E03), więc wyszłoby to
+  dopiero w kolejnej wysyłce. Po drodze agent pomylił kupujących ze sprzedawcami (`ziemniaki`
+  z 4 miastami) i założył `/towary/woda` — `check_plan` wyłapał oba, agent poprawił sam.
+- **Poprawka**: imię i nazwisko muszą być różnymi słowami, a każda odmowa dotycząca osoby mówi, że druga
+  połowa jest w innym wpisie dziennika o tym samym mieście („nigdy nie powtarzaj ani nie wymyślaj słowa,
+  żeby przejść kształt"); nazwy towarów i klucze JSON kończące się na `-i`/`-y` odrzucane jako mnoga
+  (wzorzec `koparki -> koparka`, bez podawania odpowiedzi); prompt dostał zasadę, że odmowy nie załatwia
+  się powtórzeniem słowa. Stary plan pada teraz w dokładnie czterech miejscach.
+- **Bieg 2 (zaliczony)**: 54 wywołania, 43 zapisy, 2 odmowy (to samo `/osoby/kisiel`, ale po nowym
+  komunikacie agent zapisał `rafal_kisiel`; pusta treść przy `/towary/woda`), `ziemniak` od razu.
+  `--submit`: `reset` → paczka 32 akcji (3 katalogi + 29 plików) → `done` z flagą. Łącznie **7 żądań**
+  do `/verify` (`help` + dwa razy `reset`/paczka/`done`).
+- Tryby: `--tests`, `--notes`, `--workspace`, `--prompt`, `--validate <plan.json>` (offline);
+  `--run` (agent, nic nie wysyła; `plan.json`, `validation.txt`, `batch.json` w `filesystem-cache/run-<data>/`);
+  `--help-api`, `--list [ścieżka]`, `--reset`, `--submit <plan.json>` (Hub). Żądania w `filesystem-log.jsonl`
+  z kluczem zredagowanym; cache i log gitignored, bo zawierają flagę. Notatki Natana scommitowane
+  w `natan-notes/` (publiczne, 4 KB), żeby testy działały offline.
 
 ## Zasady pracy w tym repo
 
