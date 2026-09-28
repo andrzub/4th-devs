@@ -65,6 +65,7 @@ Konwencje w projektach `*_zadanie`:
 | S04E03 "domatowo" | ✅ zaliczone | Misja ratunkowa: partyzant „w jednym z najwyższych bloków" na mapie 11×11, 300 punktów akcji, każda akcja gry przez `/verify`. **Drugie zadanie bez modelu**: wpisy `getLogs` to proza bez podpowiedzi, o trafieniu rozstrzyga flaga serwera. Planer wycenia wyczerpująco 24 porządki przeszukania po **koszcie oczekiwanym** pod budżetem najgorszego przypadku, wykonawca gra jedną akcją na raz przez guard, ledger pamięta załogi i obejrzane pola (hub tego nie oddaje). Trafienie na `G1` jako 12. z 14 pól, **155 z 300 punktów**, zero odrzuceń guarda. Pierwsze zadanie, w którym akcje gry wykonywał Claude, helikopter wezwałem ja |
 | S04E04 "filesystem" | ✅ zaliczone | Notatki Natana o handlu wymiennym (4 pliki, 4 KB) uporządkowane w wirtualnym systemie plików Huba: `/miasta` (JSON zapotrzebowania), `/osoby` (imię, nazwisko, link do miasta), `/towary` (linki do sprzedawców). Pierwsze zadanie z **bazą wiedzy jak w lekcji**: mapa treści + szablony w `workspace/`, agent `gpt-4.1` pisze do **lokalnej projekcji**, kod egzekwuje limity API (`^[a-z0-9_]+$`, ≤ 20 znaków, nazwy unikalne globalnie) i spójność z ledgerem. Pierwsza wysyłka odrzucona (`-805`, brak „Rafał Kisiel"): agent zapisał `kisiel_kisiel`, bo guard żądał dwóch słów, a **komunikat odmowy nie odsyłał do dziennika**. Po poprawce komunikatu i heurystyce liczby mnogiej (`-i`/`-y`) drugi bieg dał `rafal_kisiel` i `ziemniak`, flaga za drugą wysyłką |
 | S04E05 "foodwarehouse" | ✅ zaliczone | Osiem zamówień w magazynie Zygfryda (jedno na miasto z `food4cities.json`), każde z kodem celu i twórcą z bazy SQLite oraz podpisem SHA1 z generatora. **Wąskie okno dla modelu**: agent `gpt-4.1` ma tylko odczyt bazy przez guard i rejestrację planu (miasto → kod, twórca), a ilości, podpisy i wykonanie robi kod. Fakty do planu muszą pochodzić z wierszy, które agent naprawdę odczytał. Dwa biegi po **8 wywołań**, zero odmów, twórcy = twórcy zamówień seed. Pułapki: wyniki stronicowane po 30 (Domatowo na 2. stronie), `<`/`>` w zapytaniu = `-620`, 11 użytkowników bez `user_id`, **seedów nie da się usunąć** (`delete` udaje sukces) — na tym stanęły dwie pierwsze wysyłki; trzecia, po czyszczeniu tylko celów z planu, dała flagę. `done` toleruje seedy |
+| S05E01 "radiomonitoring" | ✅ zaliczone | Raport o mieście „Syjon" z nasłuchu radiowego: 33 przechwycenia — rozmowy, szum, Morse, XML/CSV/JSON, MP3, PNG, JPEG. Zadanie z **routingu danych**: typ pliku z bajtów, szum zwinięty do unikalnych fragmentów, Morse i dokumenty w kodzie, audio i obrazy przez `gemini-3.6-flash`, jedno wywołanie `gpt-4.1` na korpusie **~7K tokenów zamiast ~468K** surowego materiału. Powierzchnia z rekordu JSON (zaokrąglenie na `decimal`), cytaty walidowane w korpusie. Syjon = **Skarszewy** („biblijny raj" z rozmowy + `farmAnimals`), 11 magazynów (wniosek z „12. magazynu" w nagraniu), telefon z karteczki na PNG. Flaga za pierwszym `transmit`, 36 żądań, 4 wywołania modeli |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
 
@@ -1003,6 +1004,63 @@ Konwencje w projektach `*_zadanie`:
   `observations.json`, `validation.txt`, transkrypt w `foodwarehouse-cache/run-<data>/`); `--verify <plan>`,
   `--submit <plan>`, `--reset`, `--done`. Żądania w `foodwarehouse-log.jsonl` z kluczem zredagowanym; cache
   i log gitignored, bo zawierają flagę. `data/food4cities.json` scommitowany (publiczny, 677 B).
+
+## Zadanie S05E01 — "radiomonitoring" (szczegóły)
+
+- Zadanie: z nasłuchu radiowego ustalić o mieście zwanym „Syjonem": `cityName`, `cityArea` (string, dokładnie
+  2 miejsca, prawdziwe zaokrąglenie, nie obcięcie), `warehousesCount` i `phoneNumber`. POST `/verify`,
+  `task: "radiomonitoring"`, akcje `start` (`code 110`), wielokrotne `listen` i `transmit`. `listen` zwraca
+  `code 100` z `transcription` albo `meta` + `attachment` (Base64) + `filesize`; koniec puli to `code 101`
+  *„Baterie w nadajniku padly…"* z `hint`, że `start` zaczyna od nowa.
+- **Sedno: routing, nie prompt** — wskazówka zadania mówi wprost, że binarki w Base64 wrzucone do modelu
+  kosztują najwięcej. Surowe odpowiedzi to 1,87 mln znaków (~468K tokenów przy 4 znakach na token),
+  korpus analityka ~20K znaków (realnie 7043 tokeny wejścia, bo polski tekst tokenizuje się gorzej).
+- **Materiał (33 przechwycenia z 34 `listen`)**: 20 rozmów, 6 szumów („kshhh …odbierasz mnie… bzzzt…",
+  powtarzane fragmenty „cztery-siedem-dwa", „współrzędne to trzydzieści…" — przynęta), 1 Morse, XML
+  (`cityStatistics` z `trainingData="true"` o fikcyjnym „Nowogrodzie Północnym" — przynęta), CSV z ogłoszeniami
+  handlowymi, JSON z 14 miastami (`occupiedArea`, `riverAccess`, `farmAnimals`, `inhabitants` — jedyne źródło
+  powierzchni), MP3 544 KB (głos ElevenLabs, manifest C2PA w ID3), PNG 600×480 (karteczka z numerem), JPEG
+  1109×1500 (mem z X o skończonych tokenach Claude — szum).
+- **Router w kodzie** (`Routing/`), typ pliku **z bajtów, nie z etykiety** (`FileSniffer`): `Speech` idzie
+  dosłownie; `Noise` to heurystyka (≥ 5 urwanych fragmentów między `...` i ≥ 3 odgłosy radia), a wszystkie
+  szumy zwijają się do **jednej sekcji unikalnych fragmentów** (urwany prefiks ustępuje pełnej formie) —
+  kompresja, nie wyrzucanie; `Morse` to `Ti`/`Ta`/`(stop)` z polskimi literami, nieznana sekwencja zostaje
+  widoczna jako `[?…]`; `Document` — JSON zminifikowany, XML bez wcięć; `Audio`/`Image` → `gemini-3.6-flash`
+  jako części `input_audio`/`image_url` (nigdy Base64 w tekście), cache po hashu treści + modelu + promptu;
+  `Skip` — pusta odpowiedź, binarka bez czytnika, tekst ponad 20 KB.
+- Morse zdekodowany do **„MUSISZ SPRAWDZIC /DEEPER"**. Wyglądało to na wskazówkę o ukrytych danych, więc przed
+  wydaniem tokenów sprawdził to kod: PNG kończy się na `IEND`, JPEG na `FFD9`, MP3 ma tylko ID3 z C2PA —
+  nic doklejonego ani schowanego w metadanych.
+- **Model tylko tam, gdzie kod nie odpowie**: analityk `gpt-4.1` (jedno wywołanie, structured output) dostaje
+  korpus w sekcjach z numerem przechwycenia i listę nazw miast z rekordów; zwraca miasto z uzasadnieniem
+  i dowodami, liczbę magazynów i telefon **z dosłownymi cytatami** oraz pole `doubts`. **Powierzchni nie liczy**:
+  `CityTable` czyta rekordy z JSON-a, `FormatArea` zaokrągla na `decimal` połówkami w górę (`0.125` → `0.13`,
+  czego `double` ani zaokrąglenie bankierskie nie dają). `ReportValidator`: miasto musi być w rekordach (nazwa
+  w odpowiedzi pochodzi z rekordu, nie z pisowni modelu), oba cytaty muszą występować w korpusie, numer to same
+  cyfry; bez przejścia walidacji `answer.json` nie powstaje.
+- **Bez pętli agenta** — świadomie: materiał jest zebrany z góry, pytanie jedno, a pipeline z lekcji
+  („odbierasz → rozpoznajesz → dekodujesz → kierujesz") nie potrzebuje narzędzi. Warstwa `Llm/` z 02_05
+  (vision) z dołożonymi częściami `input_audio`; sekcje konfiguracji po roli: `Analyst` (OpenAI), `Media` (Gemini).
+- **Identyfikacja**: #027 nazywa Skarszewy „Miastem ocalałych… prawie biblijnym rajem" (biblijny Syjon);
+  #021 mówi, że Syjon handluje bydłem, a `farmAnimals: true` mają w JSON-ie tylko Skarszewy i Drohiczyn;
+  nagranie i CSV dają ten sam profil handlowy (wołowina/bydło za kilofy i łopaty). **Pułapka**: CSV wymienia
+  „Syjon" i „Skarszewy" w osobnych wierszach — ale z identycznym profilem. Liczba magazynów to **wniosek**:
+  nagranie ze Skarszew mówi „planujemy na wiosnę wybudować 12. magazyn", więc jest ich 11. Telefon z karteczki
+  na PNG: „Jacek Kramer – zadzwonić w sprawie noclegu na Syjonie i handlu wołowiną".
+- **Rezultat (zaliczony)**: `Skarszewy`, `10.73` (z `occupiedArea` 10.7284), `11`, `644122092` — flaga za
+  pierwszym `transmit`. **36 żądań** do Huba (`start` + 34 `listen` + `transmit`), **4 wywołania modeli**
+  (3 × Gemini, ~3,2K tokenów wejścia łącznie; analityk 7043 / 551). Zbieranie (`start`/`listen`) uruchomił
+  Claude za moją zgodą w czacie, bo to odczyt danych; `transmit` wysłałem ja.
+- Po drodze: zdekodowany JSON z #025 **nadpisał surową odpowiedź** (ta sama ścieżka `capture-025.json`) —
+  załączniki dostały człon `.attachment.`, a surowa odpowiedź została odtworzona z logu i bajtów bez ponownego
+  nasłuchu; Gemini dał dwa razy **503** „high demand" (klient ponawiał tylko 429, teraz także 503); Gemini
+  zapisał „Skarzewach" — bez znaczenia, bo nazwa pochodzi z rekordu. Skalowanie obrazów (limit 1600 px) przy
+  tych plikach się nie włączyło, zadziałało tylko przekodowanie do JPEG q85.
+- **21 testów offline** (`--tests`). Tryby: `--tests`, `--triage`, `--route` (offline), `--collect` (`start` +
+  `listen`), `--media`, `--analyze` (modele, bez `/verify`; `answer.json` tylko po walidacji), `--transmit`
+  (jedyna wysyłka). Uruchamiać z folderu zadania, bo ścieżki są względne. Surowe odpowiedzi i odczyty mediów
+  w `radiomonitoring-cache/run-<data>/`, żądania w `radiomonitoring-log.jsonl` z kluczem zredagowanym i Base64
+  skróconym do prefiksu; oba gitignored, bo zawierają flagę.
 
 ## Zasady pracy w tym repo
 
