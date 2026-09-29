@@ -65,6 +65,7 @@ Konwencje w projektach `*_zadanie`:
 | S04E03 "domatowo" | ✅ zaliczone | Misja ratunkowa: partyzant „w jednym z najwyższych bloków" na mapie 11×11, 300 punktów akcji, każda akcja gry przez `/verify`. **Drugie zadanie bez modelu**: wpisy `getLogs` to proza bez podpowiedzi, o trafieniu rozstrzyga flaga serwera. Planer wycenia wyczerpująco 24 porządki przeszukania po **koszcie oczekiwanym** pod budżetem najgorszego przypadku, wykonawca gra jedną akcją na raz przez guard, ledger pamięta załogi i obejrzane pola (hub tego nie oddaje). Trafienie na `G1` jako 12. z 14 pól, **155 z 300 punktów**, zero odrzuceń guarda. Pierwsze zadanie, w którym akcje gry wykonywał Claude, helikopter wezwałem ja |
 | S04E04 "filesystem" | ✅ zaliczone | Notatki Natana o handlu wymiennym (4 pliki, 4 KB) uporządkowane w wirtualnym systemie plików Huba: `/miasta` (JSON zapotrzebowania), `/osoby` (imię, nazwisko, link do miasta), `/towary` (linki do sprzedawców). Pierwsze zadanie z **bazą wiedzy jak w lekcji**: mapa treści + szablony w `workspace/`, agent `gpt-4.1` pisze do **lokalnej projekcji**, kod egzekwuje limity API (`^[a-z0-9_]+$`, ≤ 20 znaków, nazwy unikalne globalnie) i spójność z ledgerem. Pierwsza wysyłka odrzucona (`-805`, brak „Rafał Kisiel"): agent zapisał `kisiel_kisiel`, bo guard żądał dwóch słów, a **komunikat odmowy nie odsyłał do dziennika**. Po poprawce komunikatu i heurystyce liczby mnogiej (`-i`/`-y`) drugi bieg dał `rafal_kisiel` i `ziemniak`, flaga za drugą wysyłką |
 | S04E05 "foodwarehouse" | ✅ zaliczone | Osiem zamówień w magazynie Zygfryda (jedno na miasto z `food4cities.json`), każde z kodem celu i twórcą z bazy SQLite oraz podpisem SHA1 z generatora. **Wąskie okno dla modelu**: agent `gpt-4.1` ma tylko odczyt bazy przez guard i rejestrację planu (miasto → kod, twórca), a ilości, podpisy i wykonanie robi kod. Fakty do planu muszą pochodzić z wierszy, które agent naprawdę odczytał. Dwa biegi po **8 wywołań**, zero odmów, twórcy = twórcy zamówień seed. Pułapki: wyniki stronicowane po 30 (Domatowo na 2. stronie), `<`/`>` w zapytaniu = `-620`, 11 użytkowników bez `user_id`, **seedów nie da się usunąć** (`delete` udaje sukces) — na tym stanęły dwie pierwsze wysyłki; trzecia, po czyszczeniu tylko celów z planu, dała flagę. `done` toleruje seedy |
+| S05E02 "phonecall" | ✅ zaliczone | Rozmowa **głosowa** z operatorem OKO: każda tura to nagranie MP3 w Base64. Scenariusz i kolejność etapów w kodzie (maszyna stanu + guard), model tylko **czyta** wypowiedzi operatora. Nagrania sprawdzane w obie strony przed rozmową: synteza → dwóch niezależnych słuchaczy → powtórka, gdy nie usłyszeli kluczowych słów. **Trzy rozmowy spalone**, każda z poprawką; przełom po zajrzeniu do zapisanych odpowiedzi, które niosą `hint`, transkrypcję Huba i rosnące kody etapów. Flaga w 4. turze |
 | S05E01 "radiomonitoring" | ✅ zaliczone | Raport o mieście „Syjon" z nasłuchu radiowego: 33 przechwycenia — rozmowy, szum, Morse, XML/CSV/JSON, MP3, PNG, JPEG. Zadanie z **routingu danych**: typ pliku z bajtów, szum zwinięty do unikalnych fragmentów, Morse i dokumenty w kodzie, audio i obrazy przez `gemini-3.6-flash`, jedno wywołanie `gpt-4.1` na korpusie **~7K tokenów zamiast ~468K** surowego materiału. Powierzchnia z rekordu JSON (zaokrąglenie na `decimal`), cytaty walidowane w korpusie. Syjon = **Skarszewy** („biblijny raj" z rozmowy + `farmAnimals`), 11 magazynów (wniosek z „12. magazynu" w nagraniu), telefon z karteczki na PNG. Flaga za pierwszym `transmit`, 36 żądań, 4 wywołania modeli |
 
 ## Zadanie S01E02 — "findhim" (szczegóły)
@@ -1061,6 +1062,84 @@ Konwencje w projektach `*_zadanie`:
   (jedyna wysyłka). Uruchamiać z folderu zadania, bo ścieżki są względne. Surowe odpowiedzi i odczyty mediów
   w `radiomonitoring-cache/run-<data>/`, żądania w `radiomonitoring-log.jsonl` z kluczem zredagowanym i Base64
   skróconym do prefiksu; oba gitignored, bo zawierają flagę.
+
+## Zadanie S05E02 — "phonecall" (szczegóły)
+
+- Zadanie: dodzwonić się do operatora systemu OKO, ustalić, która z dróg `RD224`, `RD472`, `RD820` nadaje
+  się do przerzutu ludzi do Syjonu, i doprowadzić do wyłączenia monitoringu na **tej** drodze. POST
+  `/verify`, `task: "phonecall"`, akcja `start`, a potem **każda tura to nagranie MP3 w Base64**
+  (`answer.audio`). Rozmowa wieloetapowa, liczy się kolejność; pomyłka pali rozmowę i trzeba wołać `start`
+  od nowa. Po `start` jest **30 minut**, restart jest darmowy.
+- **Pierwsze zadanie z prawdziwym głosem**: synteza `gpt-4o-mini-tts` (głos `marin`) i rozpoznawanie
+  `gpt-4o-transcribe` przez osobne endpointy `/audio/speech` i `/audio/transcriptions` — nie jako część
+  wiadomości czatu. Warstwa `Llm/` z 05_01 **bez function callingu i bez części audio/vision**: tu nie ma
+  pętli agenta ani narzędzi, jest jedno pytanie na turę.
+- **Bank nagrań z kontrolą w obie strony** (`--voices`): każda z 11 wypowiedzi jest syntezowana, a potem
+  transkrybowana przez **dwóch niezależnych słuchaczy bez podpowiedzi**, i przechodzi tylko wtedy, gdy obaj
+  usłyszeli wszystkie jej kluczowe słowa (porównanie ignoruje wielkość liter, diakrytyki, spacje i myślniki,
+  więc `RD-224` = `RD224`, ale kod przeczytany słowami już nie). Bank jest ładowany przed rozmową i
+  **odmawia startu**, gdy powstał dla innego głosu albo trzyma wypowiedź, której nikt nie usłyszał.
+  Nie jest to ostrożność na zapas — przy pierwszym podejściu **3 z 11 wypowiedzi nie przeszły**.
+- **Dwa rodzaje błędów syntezy**, każdy wymaga innej odpowiedzi: *zależny od głosu* (`onyx` i `ash`
+  wymawiają „Zygfryda" tak, że słuchacz pisze „Siegfrida"; dopisek o polskiej wymowie w instrukcji nic nie
+  dał, pomógł inny głos) oraz *losowy per nagranie* (to samo zdanie raz wychodzi z „RD8-220", nagrane
+  ponownie jest czyste). Stąd `MaxTakes`; numer próby wchodzi do klucza cache, więc powtórka nie nadpisuje
+  poprzedniej. **`MaxTakes: 3` nie wystarczało** — pytanie o drogi przeszło dopiero w 4. próbie.
+- **Reguła odkryta dwukrotnie: kruche słowo stawiaj na początku zdania.** `Hasło operatorów to Barbakan`
+  dawało **„BARBACAN" przez C w 29 powtórkach z rzędu** (syntezator czyta hasło jak obce słowo), a
+  `Podaję hasło operatorów. Barbakan.` przechodzi za pierwszym. Identycznie z uzasadnieniem: `...na rozkaz
+  Zygfryda` na końcu przepadało pięć razy pod rząd, `Zygfryd zlecił tajną operację. Proszę o...` przeszło
+  od razu. Wariantów było po kilka, wybór jest **zmierzony** (`--say`), nie zgadnięty.
+- **Podział pracy**: model dostaje słowa operatora i zwraca je w jednym, stałym kształcie
+  (`OperatorReading`, structured output) — statusy dróg z cytatem, czy pyta o hasło, czy o cel, inne
+  pytanie, co wyłączył, czy rozmowa spalona. Nad tym trzy warstwy w kodzie: `CallState` (status drogi
+  zapisuje się **raz**, odpowiedź przecząca ląduje w `Contradictions`), `TurnPlanner` (kolejność etapów
+  z treści zadania, nie z promptu) i `TurnGuard` (odrzuca prośbę o drogę nienazwaną przejezdną, prośbę
+  pomijającą jedną z przejezdnych, hasło dla kogoś, kto o nie nie prosił, oraz wypowiedź pisaną w trakcie
+  rozmowy, która przemyca prośbę o monitoring z pominięciem tych kontroli). `OperatorReader` dodatkowo
+  **wyrzuca status drogi, której operator nie nazwał** — kod musi wystąpić w tym, co naprawdę padło.
+- **Trzy spalone rozmowy, każda z inną nauką**:
+  1. Operator zapytał *„W jakiej sprawie dzwonisz?"*, czytnik wziął to za pytanie o cel i poszła pełna
+     przykrywka — z „misja nie może zostać odnotowana w logach" — **zanim padło pytanie o drogi**.
+     Przykrywka jest w treści zadania przypisana do **jednej** sytuacji („Gdyby operator dopytywał,
+     dlaczego chcesz wyłączyć ten monitoring"), więc poprawka jest w kodzie, w dwóch miejscach: planer
+     sięga po nią dopiero, gdy prośba o monitoring jest złożona, a guard odrzuca ją wcześniej
+     **niezależnie od tego, co odczytał model**.
+  2. Prośba `Proszę o wyłączenie monitoringu na drodze RD820.` — spalona. Dodane hasło — **spalona
+     identycznie**, w tej samej turze, tym samym zdaniem.
+  3. Dopiero wtedy zajrzałem do **zapisanych odpowiedzi** zamiast zgadywać dalej.
+- **Hub cały czas się dokumentował, a mój kod to wyrzucał.** Odrzucenie niesie `hint` (wprost, czego
+  zabrakło), `transcription` (jak Hub usłyszał **naszą** wypowiedź) i **kod etapu**: `110` start → `120`
+  *Identity confirmed* → `150` *Road status delivered* → `160` *Password required* → `0` z flagą; przy
+  odmowie `-810` / `-790`. Rosnące kody to miara postępu, jak `-872 → -691 → -690 → -689` w S03E02, a
+  `hint` to ta sama klasa prezentu co akcja `help` w S01E05. Obie odrzucone prośby — bez hasła i z hasłem —
+  dostały **ten sam** hint: *„must justify disabling monitoring... citing a secret operation ordered by
+  Zygfryd"*. `Conversation` wypisuje teraz kod, komunikat, transkrypcję Huba i hint po każdej turze.
+- **Bramka kontrolna nie może być gorsza od drugiej strony.** Po dodaniu „Zygfryda" do prośby bank spadł
+  do 7/11, a **31 z 36 odrzuceń** dotyczyło tego jednego słowa: `whisper-1` pisał „Siegfried", „Zygfyt",
+  „Zegfryda". Tymczasem Hub w polu `transcription` zapisał „Zygfryda" **poprawnie** i przyjął zdanie
+  z tym słowem (kod `150`). Słuchacz odrzucał więc nagrania, które Hub słyszy bez trudu. Po wymianie
+  `whisper-1` → `gpt-4o-transcribe` bank wrócił do 11/11 przy 2 powtórkach, **bez nagrywania czegokolwiek
+  od nowa** — zmienił się tylko słuchacz.
+- **Symulowany operator** (`--rehearsal`) odpowiada w tym samym kształcie JSON co Hub, z `hint` włącznie,
+  więc czytnik, planer i guard działają na nim bez zmian. Sześć scenariuszy; `guarded` to operator
+  wszystkich trzech spalonych rozmów (pyta „W jakiej sprawie dzwonisz?", pali za nieproszoną przykrywkę
+  i za prośbę bez powodu) — ta sama praktyka co prawdziwa plansza z przegranego biegu w S03E03. Próba
+  generalna znalazła przy okazji dwa błędy, których testy jednostkowe nie widziały: po uzasadnieniu
+  prośba nie wracała na stół, a pytanie operatora wypierało to, czego rozmowa naprawdę potrzebowała
+  (cel improwizacji ustala teraz planer, nie treść pytania).
+- **Rezultat (zaliczony)**: 4 tury, 5 żądań, flaga w 4. turze. `Dzień dobry, mówi Tymon Gajewski.` →
+  `Jaki jest status dróg RD224, RD472 i RD820? Pytam ze względu na transport organizowany do jednej z baz
+  Zygfryda.` → `Zygfryd zlecił tajną operację. Proszę o wyłączenie monitoringu na drodze RD820.` →
+  operator zażądał hasła (`160`) → `Podaję hasło operatorów. Barbakan.` → flaga. **Hasło jednak było
+  potrzebne, ale dopiero na żądanie** — pierwotna zasada „hasło tylko gdy poprosi" była dobra, brakowało
+  wyłącznie **powodu przy prośbie**. Przejezdna okazała się `RD820` („Jedyne co ci zostało to jechać drogą
+  RD820, tylko się upewnij, że masz terenówkę"). Łącznie 17 żądań w czterech rozmowach.
+- **69 testów offline** (`--tests`), bez sieci i klucza. Tryby: `--tests`, `--voices`, `--say "<tekst>"`
+  (dobieranie wymowy), `--probe` (wysyła **tylko** `start`), `--rehearsal [nazwa]`, `--call [--step]`
+  (`--step` pokazuje każdą wypowiedź i czeka na Enter). Uruchamiać z folderu zadania. Transkrypt w
+  `phonecall-cache/run-<data>/` (tam nagrania operatora, surowe odpowiedzi i bank), żądania
+  w `phonecall-log.jsonl` z kluczem zredagowanym i Base64 skróconym do prefiksu; oba gitignored.
 
 ## Zasady pracy w tym repo
 
